@@ -76,11 +76,7 @@ class Bubble:
         self.x += self.vx * dt
         self.y += self.vy * dt
 
-        wiggle = math.sin(self.age * self.wiggle_freq) * self.wiggle_amp * dt
-        if self.wiggle_axis == "x":
-            self.x += wiggle
-        else:
-            self.y += wiggle
+        # Wiggle removed: bubbles move along straight paths using vx/vy only.
 
         if (self.x < -self.radius or
             self.x > WIDTH + self.radius or

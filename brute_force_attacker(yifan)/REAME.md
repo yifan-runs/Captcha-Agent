@@ -1,10 +1,20 @@
-### **1. Automatically generate a screen grid**
+## use
+
+```
+python run_attacker.py
+```
+
+## bugs
+
+My attack functions all always return False. I currently don’t know what the captcha success signal of our website is.
+
+## intro
+
+**1. Automatically generate a screen grid**
 
 The program divides your screen into 5×5, 6×6, 8×8, etc. grids and calculates the center coordinates of each grid cell.
 
----
-
-### **2. Automatically move the mouse and click**
+**2. Automatically move the mouse and click**
 
 It uses **pyautogui** to automatically perform:
 
@@ -14,10 +24,8 @@ It uses **pyautogui** to automatically perform:
 
 In other words, it repeatedly clicks different positions across the entire screen.
 
----
+**3. Provides three clicking strategies**
 
-### **3. Provides three clicking strategies**
-
-* **Sequential clicking:** click through all grid points one by one in order
-* **Random clicking:** click a limited number of points in a random order
-* **Spiral clicking:** start from the center of the screen and click while drawing a spiral outward
+* Sequential clicking: click through all grid points one by one in order
+* Random clicking: click a limited number of points in a random order
+* Spiral clicking: start from the center of the screen and click while drawing a spiral outward

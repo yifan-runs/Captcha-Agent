@@ -22,7 +22,6 @@ def compute_features_from_events(events: List[Dict[str, Any]]) -> Dict[str, floa
     t_end = end_evs[-1]["time"] if end_evs else evs[-1]["time"]
     total_time = max(0.0, t_end - t_start)
 
-    # ---------- A. Timing ----------
     feats["time_used_ratio"] = min(1.0, total_time / MAX_DURATION)
 
     if clicks:
@@ -33,7 +32,6 @@ def compute_features_from_events(events: List[Dict[str, Any]]) -> Dict[str, floa
     instr_time = instr_evs[0]["time"] if instr_evs else t_start
     feats["rt_first_click"] = max(0.0, first_click_time - instr_time)
 
-    # Treat clicks marked is_correct=True as “target clicks”
     target_clicks = [e for e in clicks if e.get("is_correct") is True]
     if target_clicks:
         rts = [max(0.0, e["time"] - instr_time) for e in target_clicks]
@@ -53,20 +51,16 @@ def compute_features_from_events(events: List[Dict[str, Any]]) -> Dict[str, floa
         feats["ici_mean"] = total_time
         feats["ici_cv"] = 0.0
 
-    # ---------- B. Movement / path ----------
     avg_speed, max_speed, curvature_mean, teleport_frac = _path_features(moves, clicks)
     feats["avg_speed"] = avg_speed
     feats["max_speed"] = max_speed
     feats["curvature_mean"] = curvature_mean
     feats["teleport_fraction"] = teleport_frac
 
-    # ---------- C. Click accuracy ----------
     offset_mean, offset_std = _click_offsets(clicks)
     feats["offset_mean"] = offset_mean
     feats["offset_std"] = offset_std
 
-    # ---------- D. Errors / decisions ----------
-    # “incorrect_bubble_clicks” = incorrect bubble clicks (violating ordering)
     incorrect_clicks = sum(
         1 for e in clicks if e["type"] == "bubble_click" and e.get("is_correct") is False
     )
@@ -74,7 +68,6 @@ def compute_features_from_events(events: List[Dict[str, Any]]) -> Dict[str, floa
     feats["incorrect_bubble_clicks"] = float(incorrect_clicks)
     feats["empty_clicks"] = float(empty_clicks)
 
-    # ---------- D.1 Brute-force related counts ----------
     total_clicks = len(clicks)
     feats["total_clicks"] = float(total_clicks)
 
@@ -88,16 +81,13 @@ def compute_features_from_events(events: List[Dict[str, Any]]) -> Dict[str, floa
     else:
         feats["clicks_per_second"] = 0.0
 
-    # ---------- E. Exploration / attention ----------
-    # Assume instruction area is at top (e.g., y in [0, 60])
     visited_instr = any(0 <= e.get("my", 9999) <= 60 for e in moves)
     feats["visited_instruction_area"] = 1.0 if visited_instr else 0.0
 
     pre_path = _pre_first_click_path(moves, first_click_time)
     feats["pre_first_click_path_length"] = pre_path
 
-    # ---------- G. Performance level ----------
-    # attempts_count: for now, this run is one attempt (you can override later)
+  
     feats["attempts_count"] = 1.0
 
     feats["superhuman_flag"] = _superhuman_flag(feats)
@@ -111,7 +101,7 @@ def _path_features(moves: List[Dict[str, Any]], clicks: List[Dict[str, Any]]) ->
 
     speeds: List[float] = []
     teleports = 0
-    TELEPORT_THRESHOLD = 3000.0  # px/s, adjust if needed
+    TELEPORT_THRESHOLD = 3000.0
 
     for i in range(len(moves) - 1):
         e1, e2 = moves[i], moves[i + 1]
@@ -130,7 +120,6 @@ def _path_features(moves: List[Dict[str, Any]], clicks: List[Dict[str, Any]]) ->
     max_speed = max(speeds) if speeds else 0.0
     teleport_frac = teleports / len(speeds) if speeds else 0.0
 
-    # Curvature between clicks
     if len(clicks) < 2:
         curvature_mean = 1.0
     else:
@@ -191,10 +180,6 @@ def _pre_first_click_path(moves: List[Dict[str, Any]], first_click_time: float) 
 
 
 def _superhuman_flag(feats: Dict[str, float]) -> float:
-    """
-    Simple heuristic: very fast, very precise, no errors, very regular timing.
-    You will tune this later once you see real data.
-    """
     too_fast = feats["rt_first_click"] < 0.15 and feats["rt_mean"] < 0.25
     too_precise = feats["offset_mean"] < 2.0 and feats["offset_std"] < 1.0
     no_errors = feats["incorrect_bubble_clicks"] == 0.0 and feats["empty_clicks"] == 0.0
@@ -205,9 +190,6 @@ def _superhuman_flag(feats: Dict[str, float]) -> float:
 
 
 def classify_fingerprint(features: Dict[str, float], captcha_passed: bool) -> Dict[str, Any]:
-    """
-    Very simple rule-based classifier.
-    """
     suspicious = False
     reasons = []
 
@@ -217,27 +199,22 @@ def classify_fingerprint(features: Dict[str, float], captcha_passed: bool) -> Di
     empty_ratio = features.get("empty_click_ratio", 0.0)
     cps = features.get("clicks_per_second", 0.0)
 
-    # Teleport behaviour (already tuned)
     if tele > 0.12 or (tele > 0.07 and avg_speed > 900 and empty == 0.0):
         suspicious = True
         reasons.append("too_many_teleports")
 
-    # Brute-force clicking: very fast, mostly empty clicks
     if cps > 4.0 and empty_ratio > 0.6:
         suspicious = True
         reasons.append("bruteforce_clicking_pattern")
 
-    # Extremely fast reading + solving (very strict, rarely triggered)
     if features["rt_first_click"] < 0.15 and features["rt_mean"] < 0.25:
         suspicious = True
         reasons.append("reaction_too_fast")
 
-    # Unrealistically precise clicking
     if features["offset_mean"] < 2.0 and features["offset_std"] < 1.0:
         suspicious = True
         reasons.append("clicks_too_precise")
 
-    # Overly regular timing between clicks
     if features["ici_cv"] < 0.1 and features["ici_mean"] < 0.4:
         suspicious = True
         reasons.append("click_timing_too_regular")
@@ -253,3 +230,4 @@ def classify_fingerprint(features: Dict[str, float], captcha_passed: bool) -> Di
         "suspicious": suspicious,
         "reasons": reasons,
     }
+

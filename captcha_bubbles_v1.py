@@ -17,8 +17,10 @@ MIN_SPAWN_INTERVAL = 0.8
 MAX_SPAWN_INTERVAL = 1.3
 MAX_SIMULTANEOUS_BUBBLES = 5
 
-MIN_SPEED = 40
-MAX_SPEED = 70
+MIN_SPEED = 20
+MAX_SPEED = 35
+MAX_RETRIES = 2
+RESULT_DISPLAY_TIME = 1.2
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -76,11 +78,7 @@ class Bubble:
         self.x += self.vx * dt
         self.y += self.vy * dt
 
-        wiggle = math.sin(self.age * self.wiggle_freq) * self.wiggle_amp * dt
-        if self.wiggle_axis == "x":
-            self.x += wiggle
-        else:
-            self.y += wiggle
+        # Wiggle removed: bubbles move along straight paths using vx/vy only.
 
         if (self.x < -self.radius or
             self.x > WIDTH + self.radius or
@@ -105,100 +103,76 @@ class Bubble:
 @dataclass
 class Instruction:
     text: str
-    targets: Dict[str, int]
+    # ordering task: how many to burst and direction ('ascending' or 'descending')
+    count: int
+    direction: str
 
 
 @dataclass
 class GameState:
     instruction: Instruction
     bubbles: List[Bubble] = field(default_factory=list)
-    correct_hits: Dict[str, int] = field(default_factory=dict)
+    # sizes clicked so far (in order)
+    clicked_sizes: List[int] = field(default_factory=list)
     state: str = "RUNNING"
     start_time: float = 0.0
     end_time: Optional[float] = None
 
     next_spawn_at: float = 0.0
     last_bubble_id: int = 0
-    spawn_plan: List[str] = field(default_factory=list)
+    spawn_plan: List[Dict[str, int]] = field(default_factory=list)
     spawn_index: int = 0
 
     events: List[dict] = field(default_factory=list)
+    # timestamp until which the result banner should remain visible
+    result_display_until: float = 0.0
+    # whether we've already logged the final result for this attempt
+    result_logged: bool = False
 
     def log_event(self, event_type: str, **kwargs):
         self.events.append({"type": event_type, **kwargs})
 
 
 def generate_instruction() -> Instruction:
-    mode = random.choice(["single", "double"])
-
-    if mode == "single":
-        color = random.choice(COLOR_NAMES)
-        count = random.choice([2, 3])
-        targets = {color: count}
-        text = f"Burst exactly {count} {color} bubble"
-        if count > 1:
-            text += "s"
-        text += ". Do NOT burst any other color."
-        return Instruction(text=text, targets=targets)
-
-    c1, c2 = random.sample(COLOR_NAMES, 2)
-    targets = {c1: 1, c2: 1}
-    text = f"Burst exactly 1 {c1} and 1 {c2} bubble. Do NOT burst any other color."
-    return Instruction(text=text, targets=targets)
+    # Create an ordering task: burst N bubbles in ascending/descending order of size
+    count = random.choice([2, 3])
+    direction = random.choice(["ascending", "descending"])
+    text = f"Burst {count} bubbles in {direction} order of size."
+    return Instruction(text=text, count=count, direction=direction)
 
 
-def make_spawn_plan(instr: Instruction) -> List[str]:
-    PRE_DECOYS = 3
+def make_spawn_plan(instr: Instruction) -> List[Dict[str, int]]:
+    # Create exactly 5 bubbles, each with a unique color and unique radius
+    num_bubbles = 5
+    colors = random.sample(COLOR_NAMES, num_bubbles)
+    # sample unique radii with at least 10px gap between any two
+    min_radius = 16
+    max_radius = 56
+    min_gap = 10
 
-    remaining_slots = TOTAL_SPAWNS
-    target_colors = list(instr.targets.keys())
-    target_pool: List[str] = []
-    decoy_pool: List[str] = []
+    radii: List[int] = []
+    attempts = 0
+    max_attempts = 1000
+    while len(radii) < num_bubbles and attempts < max_attempts:
+        attempts += 1
+        r = random.randint(min_radius, max_radius)
+        ok = True
+        for ex in radii:
+            if abs(r - ex) < min_gap:
+                ok = False
+                break
+        if ok:
+            radii.append(r)
 
-    for color, required in instr.targets.items():
-        base = required + 2
-        base = min(base, remaining_slots)
-        target_pool.extend([color] * base)
-        remaining_slots -= base
-        if remaining_slots <= 0:
-            break
+    # If unable to find a full set due to randomness, fall back to evenly spaced radii
+    if len(radii) < num_bubbles:
+        span = max_radius - min_radius
+        step = max(min_gap, span // (num_bubbles - 1))
+        radii = [min_radius + i * step for i in range(num_bubbles)]
 
-    non_target_colors = [c for c in COLOR_NAMES if c not in instr.targets]
-    for _ in range(remaining_slots):
-        if non_target_colors:
-            decoy_pool.append(random.choice(non_target_colors))
-        else:
-            decoy_pool.append(random.choice(target_colors))
-
-    plan: List[str] = []
-    last_was_target = False
-
-    while target_pool or decoy_pool:
-        idx = len(plan)
-
-        if idx < PRE_DECOYS and decoy_pool:
-            c = decoy_pool.pop(random.randrange(len(decoy_pool)))
-            plan.append(c)
-            last_was_target = False
-            continue
-
-        if last_was_target and decoy_pool:
-            c = decoy_pool.pop(random.randrange(len(decoy_pool)))
-            plan.append(c)
-            last_was_target = False
-            continue
-
-        if target_pool:
-            c = target_pool.pop(random.randrange(len(target_pool)))
-            plan.append(c)
-            last_was_target = True
-        elif decoy_pool:
-            c = decoy_pool.pop(random.randrange(len(decoy_pool)))
-            plan.append(c)
-            last_was_target = False
-        else:
-            break
-
+    plan: List[Dict[str, int]] = []
+    for c, r in zip(colors, radii):
+        plan.append({"color": c, "radius": r})
     return plan
 
 
@@ -206,9 +180,10 @@ def spawn_bubble(game: GameState, now: float) -> None:
     if game.spawn_index >= len(game.spawn_plan):
         return
 
-    color_name = game.spawn_plan[game.spawn_index]
+    plan_entry = game.spawn_plan[game.spawn_index]
+    color_name = plan_entry["color"]
     color = COLOR_MAP[color_name]
-    radius = random.randint(20, 26)
+    radius = plan_entry["radius"]
 
     margin_x = 70
     margin_y = HUD_HEIGHT + 20  
@@ -307,14 +282,19 @@ def init_game() -> GameState:
     instruction = generate_instruction()
     spawn_plan = make_spawn_plan(instruction)
     start_time = pygame.time.get_ticks() / 1000.0
-    correct_hits = {c: 0 for c in instruction.targets.keys()}
-    return GameState(
+    game = GameState(
         instruction=instruction,
-        correct_hits=correct_hits,
         start_time=start_time,
         next_spawn_at=start_time,
         spawn_plan=spawn_plan,
     )
+
+    # Spawn all planned bubbles immediately so all are visible when the CAPTCHA loads.
+    # We call spawn_bubble repeatedly; spawn_bubble will attempt to place bubbles without overlap.
+    while game.spawn_index < len(game.spawn_plan):
+        spawn_bubble(game, start_time)
+
+    return game
 
 
 def handle_click(game: GameState, mx: int, my: int, now: float):
@@ -331,7 +311,7 @@ def handle_click(game: GameState, mx: int, my: int, now: float):
         game.log_event("empty_click", time=now, mx=mx, my=my)
         return
 
-    color = clicked_bubble.color_name
+    size = clicked_bubble.radius
 
     game.log_event(
         "bubble_click",
@@ -339,26 +319,33 @@ def handle_click(game: GameState, mx: int, my: int, now: float):
         mx=mx,
         my=my,
         bubble_id=clicked_bubble.id,
-        bubble_color=color,
-        targets=game.instruction.targets,
+        bubble_color=clicked_bubble.color_name,
+        bubble_size=size,
+        clicked_so_far=game.clicked_sizes,
     )
+    # Check ordering rule: for ascending, each click must be strictly larger than previous;
+    # for descending, strictly smaller.
+    prev = game.clicked_sizes[-1] if game.clicked_sizes else None
 
-    if color not in game.instruction.targets:
-        game.state = "FAILED"
-        game.end_time = now
-        clicked_bubble.alive = False
-        return
+    if prev is not None:
+        if game.instruction.direction == "ascending":
+            if size <= prev:
+                game.state = "FAILED"
+                game.end_time = now
+                clicked_bubble.alive = False
+                return
+        else:  # descending
+            if size >= prev:
+                game.state = "FAILED"
+                game.end_time = now
+                clicked_bubble.alive = False
+                return
 
-    if game.correct_hits[color] >= game.instruction.targets[color]:
-        game.state = "FAILED"
-        game.end_time = now
-        clicked_bubble.alive = False
-        return
-
-    game.correct_hits[color] += 1
+    # correct click: accept and record
     clicked_bubble.alive = False
+    game.clicked_sizes.append(size)
 
-    if all(game.correct_hits[c] == req for c, req in game.instruction.targets.items()):
+    if len(game.clicked_sizes) >= game.instruction.count:
         game.state = "PASSED"
         game.end_time = now
 
@@ -406,23 +393,7 @@ def draw_hud(surface: pygame.Surface, game: GameState, now: float):
         hud_rect.x + 10,
         hud_rect.y + 26,
     )
-
-    chip_x = hud_rect.right - 8
-    chip_y = hud_rect.y + 10
-    for color_name, required in game.instruction.targets.items():
-        label = f"{required}x {color_name}"
-        color = COLOR_MAP[color_name]
-        chip_x -= 80
-        pygame.draw.circle(surface, color, (chip_x + 10, chip_y + 10), 8)
-        pygame.draw.circle(surface, (0, 0, 0, 40), (chip_x + 10, chip_y + 10), 8, 1)
-        draw_text_left(
-            surface,
-            label,
-            FONT_SMALL,
-            TEXT_SECONDARY,
-            chip_x + 24,
-            chip_y + 2,
-        )
+    # Legend removed for accessibility; HUD shows instruction only.
 
     time_left = max(0.0, MAX_DURATION - (now - game.start_time))
     bar_rect = pygame.Rect(10, HEIGHT - 18, WIDTH - 20, 8)
@@ -454,6 +425,7 @@ def main():
     clock = pygame.time.Clock()
 
     game = init_game()
+    attempts = 0
     running = True
     last_time = pygame.time.get_ticks() / 1000.0
 
@@ -471,24 +443,33 @@ def main():
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
-                game.state = "FAILED"
-                game.end_time = now
+                # Exit quietly when window is closed by the user
+                pygame.quit()
+                sys.exit()
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mx, my = event.pos
                 handle_click(game, mx, my, now)
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r and game.state != "RUNNING":
+                    # manual retry
+                    game = init_game()
+                    last_time = pygame.time.get_ticks() / 1000.0
+                    continue
+            # terminal-state handling (PASS/FAIL) is managed after drawing so a banner can be shown
 
         if game.state == "RUNNING":
             elapsed = now - game.start_time
-            if elapsed > MAX_DURATION and not all(
-                game.correct_hits[c] == req for c, req in game.instruction.targets.items()
-            ):
+            # If time runs out and required clicks haven't been made, retry or exit
+            if elapsed > MAX_DURATION and len(game.clicked_sizes) < game.instruction.count:
+                # mark as failed; logging and retry will be handled after showing the banner
                 game.state = "FAILED"
                 game.end_time = now
 
             maybe_spawn_bubbles(game, now)
             for b in game.bubbles:
                 b.move(dt)
+
+            # terminal-state handling (PASS/FAIL) happens after drawing so a banner is shown
 
         draw_background(screen)
         draw_hud(screen, game, now)
@@ -498,6 +479,18 @@ def main():
 
         for b in game.bubbles:
             b.draw(screen)
+        # If terminal state reached, ensure we log it and set up a short display window
+        if game.state in ("PASSED", "FAILED") and not game.result_logged:
+            game.end_time = now
+            game.result_display_until = now + RESULT_DISPLAY_TIME
+            game.result_logged = True
+            game.log_event(
+                "captcha_result",
+                time=now,
+                result=game.state,
+                attempts=attempts,
+                clicked_sizes=list(game.clicked_sizes),
+            )
 
         if game.state in ("PASSED", "FAILED"):
             draw_result_banner(screen, game.state)
@@ -505,10 +498,24 @@ def main():
         pygame.display.flip()
         clock.tick(FPS)
 
+        # After showing the banner for a short time, either retry or exit
+        if game.state in ("PASSED", "FAILED") and now >= game.result_display_until:
+            if game.state == "PASSED":
+                pygame.quit()
+                sys.exit()
+            else:
+                attempts += 1
+                if attempts <= MAX_RETRIES:
+                    game = init_game()
+                    last_time = pygame.time.get_ticks() / 1000.0
+                    continue
+                else:
+                    pygame.quit()
+                    sys.exit()
+
     pygame.quit()
     sys.exit()
 
 
 if __name__ == "__main__":
     main()
-

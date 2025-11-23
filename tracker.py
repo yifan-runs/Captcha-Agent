@@ -8,6 +8,7 @@ from typing import Tuple, List, Dict, Generator, Optional
 
 def kalman_tracker(
     source: int = 1,
+    roi: Tuple[float, float, float, float] = (0, 0, 1, 1),
     bg_history: int = 1000,
     varThreshold: int = 50,
     max_dist: float = 100.0,
@@ -17,10 +18,14 @@ def kalman_tracker(
     merge_dist: float = 15.0,
     shadow_detection: bool = False,
     stop_event: Optional[threading.Event] = None,
+    skip: int = 30,
 ) -> Generator[Tuple[np.ndarray, List[Dict]], None, None]:
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video source {source}")
+    
+    if any([not bool(x <= 1.0 and x >= 0.0) for x in roi]) or roi[0] > roi[2] or roi[1] > roi[3]:
+        raise Exception(f"Invalid RoI {roi}")
 
     od = cv2.createBackgroundSubtractorMOG2(history=bg_history, varThreshold=varThreshold, detectShadows=shadow_detection)
     next_id = 0
@@ -47,6 +52,7 @@ def kalman_tracker(
         return kf
 
     try:
+        count = 0
         while True:
             if stop_event is not None and stop_event.is_set():
                 break
@@ -56,7 +62,17 @@ def kalman_tracker(
                 continue
             frame_idx += 1
 
-            fg = od.apply(frame)
+            frame_h, frame_w = frame.shape[:2]
+            x0 = int(roi[0] * frame_w)
+            y0 = int(roi[1] * frame_h)
+            x1 = int(roi[2] * frame_w)
+            y1 = int(roi[3] * frame_h)
+            x0 = max(0, min(frame_w, x0))
+            x1 = max(0, min(frame_w, x1))
+            y0 = max(0, min(frame_h, y0))
+            y1 = max(0, min(frame_h, y1))
+            roi_frame = frame[y0:y1, x0:x1]
+            fg = od.apply(roi_frame)
             fg_blur = cv2.GaussianBlur(fg, (5, 5), 0)
             _, mask_bin = cv2.threshold(fg_blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -150,7 +166,6 @@ def kalman_tracker(
                 near_existing = False
                 for tid, (px, py) in predictions.items():
                     if math.hypot(cx - px, cy - py) < (max_dist * 0.35):
-                        # assume this belongs to that track (soft-association); correct it
                         meas = np.array([[cx], [cy]], dtype=np.float32)
                         tracks[tid]["kf"].correct(meas)
                         tracks[tid]["misses"] = 0
@@ -197,9 +212,16 @@ def kalman_tracker(
                 cx = float(state[0, 0])
                 cy = float(state[1, 0])
                 bbox = t.get("bbox")
-                readings.append({"id": int(tid), "cx": cx, "cy": cy, "bbox": bbox})
 
-            yield (frame.copy(), readings)
+                readings.append({
+                    "id": int(tid),
+                    "cx": cx + x0,
+                    "cy": cy + y0,
+                    "bbox": bbox,
+                })
+            if count > skip:
+                yield (frame.copy(), roi_frame.copy(), readings)
+            count += 1
 
     finally:
         cap.release()
@@ -208,6 +230,7 @@ def kalman_tracker_worker(
     output_q: queue.Queue[Tuple[np.ndarray, List[Dict]]],
     stop_event: threading.Event,
     source: int = 1,
+    roi: Tuple[float, float, float, float] = (0, 0, 1, 1),
     bg_history: int = 1000,
     varThreshold: int = 50,
     max_dist: float = 100.0,
@@ -220,6 +243,7 @@ def kalman_tracker_worker(
     """
     gen = kalman_tracker(
         source=source,
+        roi=roi,
         bg_history=bg_history,
         varThreshold=varThreshold,
         max_dist=max_dist,
@@ -229,13 +253,17 @@ def kalman_tracker_worker(
     )
 
     try:
-        for frame, readings in gen:
+        for frame, roi, readings in gen:
             if stop_event.is_set():
                 break
             try:
-                output_q.put((frame, readings), timeout=put_timeout)
+                output_q.put((frame, roi, readings), timeout=put_timeout)
             except queue.Full:
-                continue
+                try: # drop old item
+                    _ = output_q.get_nowait()
+                except queue.Empty:
+                    pass
+                output_q.put((frame, roi, readings), timeout=put_timeout)
     finally:
         try:
             gen.close()
@@ -246,12 +274,12 @@ def kalman_tracker_worker(
 if __name__ == "__main__":
     import sys
 
-    q: queue.Queue[Tuple[np.ndarray, List[Dict]]] = queue.Queue(maxsize=8)
+    q: queue.Queue[Tuple[np.ndarray, List[Dict]]] = queue.Queue(maxsize=1)
     stop_ev = threading.Event()
     worker = threading.Thread(
         target=kalman_tracker_worker,
         args=(q, stop_ev),
-        kwargs={"source": 1, "max_dist": 100, "max_misses": 60, "put_timeout": 0.02},
+        kwargs={"source": 1, "roi": (0.025, 0.15, 0.975, 0.66), "max_dist": 150, "max_misses": 60, "put_timeout": 0.02},
         daemon=True,
     )
     worker.start()
@@ -259,13 +287,12 @@ if __name__ == "__main__":
     try:
         while True:
             try:
-                frame, readings = q.get(timeout=1.0)
+                frame, roi, readings = q.get(timeout=1.0)
             except queue.Empty:
                 continue
 
             for r in readings:
                 cx, cy = int(r["cx"]), int(r["cy"])
-                bbox = r["bbox"]
                 cv2.circle(frame, (cx, cy), 6, (0, 255, 0), 2)
                 cv2.putText(frame, f'ID {r["id"]}', (cx + 8, cy - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 

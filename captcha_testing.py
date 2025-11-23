@@ -5,7 +5,7 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
 
-import fingerprinting_test
+import fingerprinting_v2
 
 pygame.init()
 
@@ -80,6 +80,8 @@ class Bubble:
         self.x += self.vx * dt
         self.y += self.vy * dt
 
+        # Wiggle removed: bubbles move along straight paths using vx/vy only.
+
         if (self.x < -self.radius or
             self.x > WIDTH + self.radius or
             self.y < -self.radius or
@@ -103,6 +105,7 @@ class Bubble:
 @dataclass
 class Instruction:
     text: str
+    # ordering task: how many to burst and direction ('ascending' or 'descending')
     count: int
     direction: str
 
@@ -123,7 +126,9 @@ class GameState:
     spawn_index: int = 0
 
     events: List[dict] = field(default_factory=list)
+    # timestamp until which the result banner should remain visible
     result_display_until: float = 0.0
+    # whether we've already logged the final result for this attempt
     result_logged: bool = False
 
     def log_event(self, event_type: str, **kwargs):
@@ -131,6 +136,7 @@ class GameState:
 
 
 def generate_instruction() -> Instruction:
+    # Create an ordering task: burst N bubbles in ascending/descending order of size
     count = random.choice([2, 3])
     direction = random.choice(["ascending", "descending"])
     text = f"Burst {count} bubbles in {direction} order of size."
@@ -138,8 +144,10 @@ def generate_instruction() -> Instruction:
 
 
 def make_spawn_plan(instr: Instruction) -> List[Dict[str, int]]:
+    # Create exactly 5 bubbles, each with a unique color and unique radius
     num_bubbles = 5
     colors = random.sample(COLOR_NAMES, num_bubbles)
+    # sample unique radii with at least 10px gap between any two
     min_radius = 16
     max_radius = 56
     min_gap = 10
@@ -158,6 +166,7 @@ def make_spawn_plan(instr: Instruction) -> List[Dict[str, int]]:
         if ok:
             radii.append(r)
 
+    # If unable to find a full set due to randomness, fall back to evenly spaced radii
     if len(radii) < num_bubbles:
         span = max_radius - min_radius
         step = max(min_gap, span // (num_bubbles - 1))
@@ -282,9 +291,12 @@ def init_game() -> GameState:
         spawn_plan=spawn_plan,
     )
 
+    # Fingerprinting: mark session start and instruction time
     game.log_event("session_start", time=start_time)
     game.log_event("instruction_shown", time=start_time, text=instruction.text)
 
+    # Spawn all planned bubbles immediately so all are visible when the CAPTCHA loads.
+    # We call spawn_bubble repeatedly; spawn_bubble will attempt to place bubbles without overlap.
     while game.spawn_index < len(game.spawn_plan):
         spawn_bubble(game, start_time)
 
@@ -308,15 +320,17 @@ def handle_click(game: GameState, mx: int, my: int, now: float):
     size = clicked_bubble.radius
     prev = game.clicked_sizes[-1] if game.clicked_sizes else None
 
+    # Determine correctness according to ordering rule
     is_correct_click = True
     if prev is not None:
         if game.instruction.direction == "ascending":
             if size <= prev:
                 is_correct_click = False
-        else:
+        else:  # descending
             if size >= prev:
                 is_correct_click = False
 
+    # Log click with extra info for fingerprinting
     game.log_event(
         "bubble_click",
         time=now,
@@ -336,6 +350,7 @@ def handle_click(game: GameState, mx: int, my: int, now: float):
         clicked_bubble.alive = False
         return
 
+    # correct click: accept and record
     clicked_bubble.alive = False
     game.clicked_sizes.append(size)
 
@@ -387,6 +402,7 @@ def draw_hud(surface: pygame.Surface, game: GameState, now: float):
         hud_rect.x + 10,
         hud_rect.y + 26,
     )
+    # Legend removed for accessibility; HUD shows instruction only.
 
     time_left = max(0.0, MAX_DURATION - (now - game.start_time))
     bar_rect = pygame.Rect(10, HEIGHT - 18, WIDTH - 20, 8)
@@ -451,10 +467,13 @@ def main():
                     game = init_game()
                     last_time = pygame.time.get_ticks() / 1000.0
                     continue
+            # terminal-state handling (PASS/FAIL) is managed after drawing so a banner can be shown
 
         if game.state == "RUNNING":
             elapsed = now - game.start_time
+            # If time runs out and required clicks haven't been made, retry or exit
             if elapsed > MAX_DURATION and len(game.clicked_sizes) < game.instruction.count:
+                # mark as failed; logging and retry will be handled after showing the banner
                 game.state = "FAILED"
                 game.end_time = now
 
@@ -462,6 +481,7 @@ def main():
             for b in game.bubbles:
                 b.move(dt)
 
+            # terminal-state handling (PASS/FAIL) happens after drawing so a banner is shown
 
         draw_background(screen)
         draw_hud(screen, game, now)
@@ -471,6 +491,7 @@ def main():
 
         for b in game.bubbles:
             b.draw(screen)
+        # If terminal state reached, ensure we log it and set up a short display window
         if game.state in ("PASSED", "FAILED") and not game.result_logged:
             game.end_time = now
             game.result_display_until = now + RESULT_DISPLAY_TIME
@@ -482,6 +503,7 @@ def main():
                 attempts=attempts,
                 clicked_sizes=list(game.clicked_sizes),
             )
+            # Fingerprinting: mark session end timestamp
             game.log_event("session_end", time=now)
 
         if game.state in ("PASSED", "FAILED"):
@@ -490,9 +512,11 @@ def main():
         pygame.display.flip()
         clock.tick(FPS)
 
+        # After showing the banner for a short time, either retry or exit
         if game.state in ("PASSED", "FAILED") and now >= game.result_display_until:
-            features = fingerprinting_test.compute_features_from_events(game.events)
-            classification = fingerprinting_test.classify_fingerprint(
+            # Fingerprinting: compute and print behaviour features for this attempt
+            features = fingerprinting_v2.compute_features_from_events(game.events)
+            classification = fingerprinting_v2.classify_fingerprint(
                 features,
                 captcha_passed=(game.state == "PASSED"),
             )
@@ -521,4 +545,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

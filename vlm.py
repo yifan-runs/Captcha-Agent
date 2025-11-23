@@ -8,6 +8,7 @@ from tracker import kalman_tracker_worker
 import cv2
 import pygetwindow
 import random
+import json
 
 def jitter_tween_factory(jitter_strength: float = 0.05):
     def jitter_tween(t: float) -> float:
@@ -29,7 +30,7 @@ tracker_thread = threading.Thread(
     kwargs={
         "source": 1,
         "roi": (0.025, 0.15, 0.975, 0.66), # ((win.left / 1920), (win.top / 1080), ((win.left + win.width) / 1920), ((win.top + win.height) / 1080)), 
-        "max_dist": 100,
+        "max_dist": 150,
         "max_misses": 60,
         "put_timeout": 0.01
     },
@@ -37,11 +38,18 @@ tracker_thread = threading.Thread(
 )
 tracker_thread.start()
 
-client = ollama.Client(host="", timeout=20)
+client = ollama.Client(host="", timeout=60)
 # MODEL_NAME = "moondream:1.8b"
 # MODEL_NAME = "qwen3-vl:2b"
 MODEL_NAME = "minicpm-v:8b"
+# MODEL_NAME = "granite3.2-vision:2b"
 print(client.show(MODEL_NAME))
+client.chat(
+    model=MODEL_NAME,
+    messages=[{"role": "user", "content": "You are an agent controlling clicks on moving bubbles.\nWait until your first assignment."}],
+    keep_alive=-1,
+    stream=False,
+)
 
 try:
     while True:
@@ -63,7 +71,8 @@ try:
         prompt_text += (
             "Select the IDs to click according to the rules defined on the screen.\n"
             "Some IDs may point to non-existent bubbles, make sure each selected ID hovers over a real bubble.\n"
-            "Output exactly in the format where IDs are integers and in order of whatever rules you have read from the image, if you do not finish the task in this attempt, remember pixel size of the previously pressed bubbles: {\"click\":[ID1,ID2,...]}\n"
+            "Approximate the size in pixels of each bubble before making any decisions.\n"
+            "Output exactly in order of the rules you have read from the image i.e. {\"click_ids\":[ID1,ID2,...]} where ID1,ID2,... must be integers.\n"
         )
 
         ok, buffer = cv2.imencode(".jpg", frame)
@@ -75,25 +84,29 @@ try:
         try:
             response = client.chat(
                 model=MODEL_NAME,
-                messages=[{"role": "user", "content": prompt_text, "images": [image_bytes],}],
-                keep_alive="2m"
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt_text,
+                        "images": [image_bytes],
+                    }
+                ],
+                format="json",
+                keep_alive=-1,
+                stream=False,
+                think=False,
             )
+
             raw_content = response.message.content
-            print(raw_content)
+            print("RAW:", raw_content)
+            data = json.loads(raw_content)
+            click_ids = data.get("click_ids", [])
+            if not isinstance(click_ids, list):
+                raise ValueError("click_ids is not a list")
+            print("click_ids:", click_ids)
         except Exception as e:
-            print("LLM call failed:", e)
-            continue
-
-        import json, re
-        click_ids = []
-        try:
-            json_str = re.search(r"\{.*?\}", raw_content, re.DOTALL)
-            if json_str:
-                data = json.loads(json_str.group(0))
-                click_ids = data.get("click", [])
-
-        except Exception as e:
-            print("Failed to parse LLM output:", e, raw_content)
+            print("LLM call / JSON parse failed:", e)
+            click_ids = []
 
         try: # get new locations
             frame, _, readings = q.get(timeout=1) # longer timeout just in case

@@ -20,6 +20,7 @@ from datetime import datetime
 
 import pyautogui
 import pytesseract
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 import numpy as np
 import cv2
 
@@ -191,7 +192,7 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
         log_event("ocr_text", raw=text)
 
         number_match = re.search(r"\b(2|3)\b", text)
-        order_match = re.search(r"\b(ascending|descending)\b", text, re.IGNORECASE)
+        order_match = re.search(r"\b(a?scending|d[e3]scending|desoending)\b", text, re.IGNORECASE)
 
         if number_match and order_match:
             instruction = {
@@ -441,39 +442,45 @@ def choose_targets_and_click():
 # Main
 # -------------------------
 def main():
-    print("custom_agent starting. Looking for CAPTCHA window...")
-    # detect window initially and store
-    coords = find_window()
-    if coords:
+    print("custom_agent starting.")
+
+    while True:
+        # Check if CAPTCHA window exists
+        coords = find_window()
+        if not coords:
+            print("CAPTCHA window not found. Assuming solved or closed. Exiting.")
+            break
+
         shared_state["window_coords"] = coords
         print("Found window coords:", coords)
-    else:
-        print("Window not yet found; threads will wait and retry.")
 
-    # start threads: OCR, tracker
-    t_ocr = threading.Thread(target=ocr_read_hud_thread, name="OCRThread", daemon=True)
-    t_track = threading.Thread(target=bubble_tracking_thread, name="TrackThread", daemon=True)
-    t_clicker = threading.Thread(target=choose_targets_and_click, name="ClickerThread", daemon=True)
+        # Reset shared state for this round
+        shared_state["instruction"] = None
+        shared_state["bubbles"] = []
+        shared_state["running"] = True
 
-    t_track.start()
-    t_ocr.start()
-    # clicker will wait for instruction
-    t_clicker.start()
+        # Start threads: OCR, tracker, clicker
+        t_ocr = threading.Thread(target=ocr_read_hud_thread, name="OCRThread", daemon=True)
+        t_track = threading.Thread(target=bubble_tracking_thread, name="TrackThread", daemon=True)
+        t_clicker = threading.Thread(target=choose_targets_and_click, name="ClickerThread", daemon=True)
 
-    # Wait for OCR and clicker to finish or time out
-    try:
-        # join OCR with reasonable timeout; we don't block forever
+        t_track.start()
+        t_ocr.start()
+        t_clicker.start()
+
+        # Wait for OCR and clicker to finish for this round
         t_ocr.join(timeout=60)
-        # allow clicker to finish (it waits for instruction)
         t_clicker.join(timeout=30)
-    except KeyboardInterrupt:
-        print("User interrupted; shutting down.")
-    finally:
+
+        # Stop tracker for this round
         shared_state["running"] = False
-        # give tracker a moment
         t_track.join(timeout=2)
 
-    print("Agent finished. Events log:")
+        # Small delay before next round
+        time.sleep(1)
+        print("Round finished. Checking if CAPTCHA is still present...")
+
+    print("Agent finished. All rounds completed.")
     for e in shared_state["events"]:
         ts = datetime.fromtimestamp(e["time"]).isoformat()
         print(ts, e["type"], {k: v for k, v in e.items() if k not in ("time", "type")})

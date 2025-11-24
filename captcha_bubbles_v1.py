@@ -7,8 +7,8 @@ import json
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
 
-# fingerprinting module (must provide compute_features_from_events & classify_fingerprint)
-import fingerprinting_v2
+# fingerprinting module
+import fingerprinting_v3
 
 pygame.init()
 
@@ -53,8 +53,8 @@ FONT_TITLE = pygame.font.SysFont("arial", 18, bold=True)
 FONT = pygame.font.SysFont("arial", 16)
 FONT_SMALL = pygame.font.SysFont("arial", 13)
 
-MIN_SPEED = 20
-MAX_SPEED = 40
+MIN_SPEED = 15
+MAX_SPEED = 35
 MIN_DIFF = 6  # Minimum size difference between bubbles
 
 def random_velocity():
@@ -107,16 +107,23 @@ class Bubble:
                 self.x = random.randint(50, WIDTH - 50)
                 self.y = HEIGHT + self.radius + 20
 
-            # New velocity aimed inward (quick re-entry)
+            # New velocity aimed roughly inward (less center gravity)
             cx, cy = WIDTH // 2, (HEIGHT + HUD_HEIGHT) // 2
             dx = cx - self.x
             dy = cy - self.y
             dist = math.hypot(dx, dy) or 1.0
             dx /= dist
             dy /= dist
-            speed = random.uniform(80, 140)
-            self.vx = dx * speed
-            self.vy = dy * speed
+
+            # Add angular noise (reduces center pull)
+            angle = math.atan2(dy, dx)
+            noise = random.uniform(-1.0, 1.0)
+            angle += noise
+
+            speed = random.uniform(40, 80)
+            self.vx = math.cos(angle) * speed
+            self.vy = math.sin(angle) * speed
+
 
     def draw(self, surface: pygame.Surface):
         if not self.alive:
@@ -204,16 +211,20 @@ def init_game() -> GameState:
 
         if side == "left":
             x = -radius - 30
-            y = random.randint(HUD_HEIGHT + 30, HEIGHT - 40)
+            y = random.randint(HUD_HEIGHT + 10, HEIGHT - 10)
+
         elif side == "right":
             x = WIDTH + radius + 30
-            y = random.randint(HUD_HEIGHT + 30, HEIGHT - 40)
+            y = random.randint(HUD_HEIGHT + 10, HEIGHT - 10)
+
         elif side == "top":
-            x = random.randint(50, WIDTH - 50)
-            y = HUD_HEIGHT - radius - 40
-        else:
-            x = random.randint(50, WIDTH - 50)
-            y = HEIGHT + radius + 40
+            x = random.randint(20, WIDTH - 20)
+            y = random.randint(-radius - 40, HUD_HEIGHT - radius - 5)
+
+        else:  # bottom
+            x = random.randint(20, WIDTH - 20)
+            y = random.randint(HEIGHT + radius + 10, HEIGHT + radius + 40)
+
 
         # Velocity aimed directly toward the center so they enter quickly
         dx = CENTER_X - x

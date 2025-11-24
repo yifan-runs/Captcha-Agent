@@ -58,13 +58,14 @@ MAX_SPEED = 35
 MIN_DIFF = 6  # Minimum size difference between bubbles
 
 def random_velocity():
-    """Generate a random velocity for bubbles that have already entered the scene."""
-    vx = 0.0
-    vy = 0.0
-    while abs(vx) < 5 and abs(vy) < 5:
-        vx = random.uniform(-MAX_SPEED, MAX_SPEED)
-        vy = random.uniform(-MAX_SPEED, MAX_SPEED)
+    vx = 0
+    vy = 0
+    # Require strong movement like friend's code
+    while abs(vx) < 30 and abs(vy) < 30:
+        vx = random.uniform(-120, 120)
+        vy = random.uniform(-120, 120)
     return vx, vy
+
 
 
 @dataclass
@@ -379,8 +380,8 @@ def main():
                 # mark session end, save fingerprint, then quit
                 game.log_event("session_end", time=now)
                 try:
-                    features = fingerprinting_v2.compute_features_from_events(game.events)
-                    classification = fingerprinting_v2.classify_fingerprint(features, captcha_passed=(game.state == "PASSED"))
+                    features = fingerprinting_v3.compute_features_from_events(game.events)
+                    classification = fingerprinting_v3.classify_fingerprint(features, captcha_passed=(game.state == "PASSED"))
                 except Exception as e:
                     print("[FINGERPRINT] compute/classify failed on quit:", e)
                     features = None
@@ -444,8 +445,8 @@ def main():
             features = None
             classification = None
             try:
-                features = fingerprinting_v2.compute_features_from_events(game.events)
-                classification = fingerprinting_v2.classify_fingerprint(
+                features = fingerprinting_v3.compute_features_from_events(game.events)
+                classification = fingerprinting_v3.classify_fingerprint(
                     features,
                     captcha_passed=(game.state == "PASSED"),
                 )

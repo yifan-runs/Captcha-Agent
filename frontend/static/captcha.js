@@ -170,18 +170,25 @@ function initGame() {
 
 function handleClick(mx, my) {
   if (game.state != "RUNNING") return;
+
+  // Iterate from top-most to bottom-most (reverse draw order)
   let clicked = null;
-  for (const b of game.bubbles) {
+  for (let i = game.bubbles.length - 1; i >= 0; i--) {
+    const b = game.bubbles[i];
+    if (!b.alive) continue; // ignore already popped bubbles
     if (b.isClicked(mx, my)) {
       clicked = b;
       break;
     }
   }
+
   if (!clicked) return;
+
   const size = clicked.radius;
   const prev = game.clicked_sizes.length
     ? game.clicked_sizes[game.clicked_sizes.length - 1]
     : null;
+
   if (prev !== null) {
     if (game.instruction.direction == "ascending" && size <= prev) {
       game.state = "FAILED";
@@ -196,8 +203,10 @@ function handleClick(mx, my) {
       return;
     }
   }
+
   game.clicked_sizes.push(size);
   clicked.alive = false;
+
   if (game.clicked_sizes.length >= game.instruction.count) {
     game.state = "PASSED";
     game.end_time = performance.now() / 1000;

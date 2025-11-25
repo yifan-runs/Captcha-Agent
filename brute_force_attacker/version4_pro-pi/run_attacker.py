@@ -12,6 +12,7 @@ import os
 class BubbleCaptchaSolver:
     def __init__(self):
         self.driver = None
+        self.screenshot_count = 0
 
     def setup_driver(self):
         """Initialize Chrome driver with minimal options"""
@@ -51,6 +52,18 @@ class BubbleCaptchaSolver:
             print(f"Driver initialization failed: {e}")
             return False
 
+    def take_screenshot(self, description=""):
+        """Take screenshot and save with descriptive filename"""
+        try:
+            self.screenshot_count += 1
+            filename = f"screenshot_{self.screenshot_count:02d}_{description}.png"
+            self.driver.save_screenshot(filename)
+            print(f"Screenshot saved: {filename}")
+            return True
+        except Exception as e:
+            print(f"Failed to take screenshot: {e}")
+            return False
+
     def solve_captcha(self):
         """Main method to solve the CAPTCHA"""
         try:
@@ -67,10 +80,15 @@ class BubbleCaptchaSolver:
             # Wait for page to load
             time.sleep(3)
             
+            # Take initial screenshot
+            self.take_screenshot("initial_page")
+            
             # Check if Canvas exists
             try:
                 canvas = self.driver.find_element(By.CSS_SELECTOR, "#captchaCanvas")
                 print("Canvas element found")
+                # Take screenshot of canvas
+                self.take_screenshot("canvas_loaded")
             except:
                 print("Canvas element not found")
                 return False
@@ -80,13 +98,19 @@ class BubbleCaptchaSolver:
             print(f"Instruction: {direction} order, {count} bubbles")
 
             # Multiple attempts
-            for attempt in range(1):  # Increased attempts
+            for attempt in range(1):
                 print(f"\n--- Attempt {attempt + 1}/5 ---")
+                
+                # Take screenshot before analysis
+                self.take_screenshot(f"attempt_{attempt+1}_before_analysis")
                 
                 # Analyze bubbles
                 bubbles = self.analyze_bubbles()
                 if len(bubbles) >= 3:  # Require at least 3 bubbles to proceed
                     print(f"Found {len(bubbles)} bubbles")
+                    
+                    # Take screenshot after analysis
+                    self.take_screenshot(f"attempt_{attempt+1}_bubbles_found")
                     
                     # Try different strategies
                     strategies = [
@@ -97,28 +121,42 @@ class BubbleCaptchaSolver:
                         ("mixed", 5)             # Click 5 mixed sizes
                     ]
                     
-                    for strategy_name, click_count in strategies:
+                    for strategy_index, (strategy_name, click_count) in enumerate(strategies):
                         if len(bubbles) >= click_count:
                             print(f"Trying strategy: {strategy_name} with {click_count} bubbles")
+                            
+                            # Take screenshot before clicking
+                            self.take_screenshot(f"attempt_{attempt+1}_strategy_{strategy_index+1}_before_click")
                             
                             if self.click_bubbles_strategy(direction, click_count, bubbles, strategy_name):
                                 print(f"Successfully clicked {click_count} bubbles using {strategy_name}")
                                 
+                                # Take screenshot after clicking
+                                self.take_screenshot(f"attempt_{attempt+1}_strategy_{strategy_index+1}_after_click")
+                                
                                 # Check result
                                 if self.check_result():
                                     print("CAPTCHA solved successfully!")
+                                    # Take final success screenshot
+                                    self.take_screenshot("success_final")
                                     return True
                                 else:
                                     print("Strategy didn't work, trying next...")
+                                    # Take screenshot of failed attempt
+                                    self.take_screenshot(f"attempt_{attempt+1}_strategy_{strategy_index+1}_failed")
                                     time.sleep(1)
                 
                 time.sleep(2)
             
             print("Failed to solve CAPTCHA after all attempts and strategies")
+            # Take final failure screenshot
+            self.take_screenshot("failure_final")
             return False
             
         except Exception as e:
             print(f"Error during CAPTCHA solving: {e}")
+            # Take error screenshot
+            self.take_screenshot("error_occurred")
             return False
         finally:
             self.cleanup()

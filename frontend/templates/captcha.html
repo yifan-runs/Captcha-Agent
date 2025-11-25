@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bubble CAPTCHA</title>
+<style>
+    body {
+        margin: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        font-family: Arial, sans-serif;
+        background: black;
+    }
+    #captchaCanvas {
+        border-radius: 12px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+    }
+</style>
+</head>
+<body>
+<canvas id="captchaCanvas" width="600" height="350"></canvas>
+<script src="{{ url_for('static', filename='captcha.js') }}"></script>
+</body>
+</html>

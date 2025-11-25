@@ -169,13 +169,13 @@ function initGame() {
 }
 
 function handleClick(mx, my) {
-  if (game.state != "RUNNING") return;
+  if (game.state !== "RUNNING") return;
 
   // Iterate from top-most to bottom-most (reverse draw order)
   let clicked = null;
   for (let i = game.bubbles.length - 1; i >= 0; i--) {
     const b = game.bubbles[i];
-    if (!b.alive) continue; // ignore already popped bubbles
+    if (!b.alive) continue;
     if (b.isClicked(mx, my)) {
       clicked = b;
       break;
@@ -184,19 +184,35 @@ function handleClick(mx, my) {
 
   if (!clicked) return;
 
+  // Compute distance from click → bubble centre
+  const dx = mx - clicked.x;
+  const dy = my - clicked.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  // LOGGING INFO HERE ⬇️
+  console.log("📍 Bubble Popped:");
+  console.log("   Bubble ID:", clicked.id);
+  console.log("   Bubble Center:", { x: clicked.x, y: clicked.y });
+  console.log("   Click Position:", { x: mx, y: my });
+  console.log("   Distance (click → centre):", dist.toFixed(2));
+  console.log("   Bubble Radius:", clicked.radius);
+  console.log("   Timestamp:", performance.now().toFixed(2));
+  console.log("-------------------------------------------");
+
+  // VALIDATION LOGIC
   const size = clicked.radius;
   const prev = game.clicked_sizes.length
     ? game.clicked_sizes[game.clicked_sizes.length - 1]
     : null;
 
   if (prev !== null) {
-    if (game.instruction.direction == "ascending" && size <= prev) {
+    if (game.instruction.direction === "ascending" && size <= prev) {
       game.state = "FAILED";
       game.end_time = performance.now() / 1000;
       clicked.alive = false;
       return;
     }
-    if (game.instruction.direction == "descending" && size >= prev) {
+    if (game.instruction.direction === "descending" && size >= prev) {
       game.state = "FAILED";
       game.end_time = performance.now() / 1000;
       clicked.alive = false;

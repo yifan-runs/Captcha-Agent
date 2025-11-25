@@ -1,0 +1,108 @@
+{
+  "events": [
+    {
+      "type": "session_start",
+      "time": 1.321
+    },
+    {
+      "type": "instruction_shown",
+      "time": 1.321,
+      "text": "Burst any 2 bubbles in descending order of size."
+    },
+    {
+      "type": "move",
+      "mx": 294,
+      "my": 197,
+      "time": 16.03
+    },
+    {
+      "type": "bubble_click",
+      "mx": 294,
+      "my": 197,
+      "bubble_id": 2,
+      "bubble_color": "RED",
+      "bubble_size": 39,
+      "clicked_so_far": [],
+      "bubble_center": [
+        302.9792548219836,
+        205.05085859636418
+      ],
+      "is_correct": true,
+      "time": 16.129
+    },
+    {
+      "type": "move",
+      "mx": 138,
+      "my": 170,
+      "time": 16.427
+    },
+    {
+      "type": "bubble_click",
+      "mx": 138,
+      "my": 170,
+      "bubble_id": 3,
+      "bubble_color": "GREEN",
+      "bubble_size": 30,
+      "clicked_so_far": [
+        39
+      ],
+      "bubble_center": [
+        127.3109293168168,
+        174.73989397393842
+      ],
+      "is_correct": true,
+      "time": 16.531
+    },
+    {
+      "type": "captcha_result",
+      "result": "PASSED",
+      "attempts": 0,
+      "clicked_sizes": [
+        39,
+        30
+      ],
+      "time": 16.534
+    },
+    {
+      "type": "session_end",
+      "time": 16.525
+    }
+  ],
+  "features": {
+    "time_used_ratio": 0.7602,
+    "rt_first_click": 14.808000000000002,
+    "rt_mean": 15.009,
+    "ici_mean": 0.40199999999999747,
+    "ici_cv": 0.0,
+    "avg_speed": 398.7891627796115,
+    "max_speed": 398.7891627796115,
+    "curvature_mean": 1.0,
+    "teleport_fraction": 0.0,
+    "speed_std": 0.0,
+    "move_count": 2.0,
+    "click_count": 2.0,
+    "offset_mean": 11.876421472294348,
+    "offset_std": 0.18356780202786283,
+    "incorrect_bubble_clicks": 0.0,
+    "empty_clicks": 0.0,
+    "total_clicks": 2.0,
+    "empty_click_ratio": 0.0,
+    "clicks_per_second": 0.13154433043935806,
+    "visited_instruction_area": 0.0,
+    "pre_first_click_path_length": 0.0,
+    "attempts_count": 1.0,
+    "superhuman_flag": 0.0
+  },
+  "classification": {
+    "is_human": true,
+    "suspicious": false,
+    "risk_score": 0.15,
+    "risk_movement": 0.0,
+    "risk_timing": 0.15,
+    "risk_errors": 0.0,
+    "risk_attention": 0.0,
+    "reasons": [
+      "timing_too_regular"
+    ]
+  }
+}

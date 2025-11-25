@@ -113,6 +113,11 @@ function generateInstruction() {
 function initGame() {
   const instruction = generateInstruction();
   const now = performance.now() / 1000;
+
+  const DISTINCT_RADII = [15, 30, 50, 65, 80]; // fixed distinct sizes
+  const radii = [...DISTINCT_RADII];
+  radii.sort(() => Math.random() - 0.5); // shuffle for randomness
+
   const gameState = {
     instruction: instruction,
     bubbles: [],
@@ -125,18 +130,41 @@ function initGame() {
   };
 
   for (let i = 0; i < 5; i++) {
-    const radius = (20 + Math.random() * 35) | 0;
+    const radius = radii[i]; // pick distinct fixed size
     const color_name =
       COLOR_NAMES[Math.floor(Math.random() * COLOR_NAMES.length)];
-    const x = 40 + radius + Math.random() * (WIDTH - 80 - 2 * radius);
-    const y =
-      HUD_HEIGHT +
-      40 +
-      radius +
-      Math.random() * (HEIGHT - HUD_HEIGHT - 100 - 2 * radius);
+
+    // NON-OVERLAPPING placement
+    let x, y;
+    let safe = false;
+    let attempts = 0;
+
+    while (!safe && attempts < 200) {
+      attempts++;
+      x = 40 + radius + Math.random() * (WIDTH - 80 - 2 * radius);
+      y =
+        HUD_HEIGHT +
+        40 +
+        radius +
+        Math.random() * (HEIGHT - HUD_HEIGHT - 100 - 2 * radius);
+
+      safe = true;
+      for (const b of gameState.bubbles) {
+        const dx = x - b.x;
+        const dy = y - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < radius + b.radius + 12) {
+          safe = false;
+          break;
+        }
+      }
+    }
+
     gameState.bubbles.push(new Bubble(i + 1, x, y, radius, color_name));
   }
 
+  console.log("Generated radii:", radii);
   return gameState;
 }
 

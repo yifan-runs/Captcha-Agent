@@ -1,14 +1,13 @@
 import threading
 import queue
 import time
-import pyautogui
 from typing import Tuple, List, Dict
 import ollama
 from tracker import kalman_tracker_worker
 import cv2
-import pygetwindow
 import random
 import json
+from selenium_portal import SeleniumPortal
 
 def jitter_tween_factory(jitter_strength: float = 0.05):
     def jitter_tween(t: float) -> float:
@@ -19,20 +18,20 @@ def jitter_tween_factory(jitter_strength: float = 0.05):
     return jitter_tween
 
 jitter_tween = jitter_tween_factory(float(random.randrange(40, 80)) * 0.001)
-win = pygetwindow.getWindowsWithTitle("Anti-AI Bubble CAPTCHA")[0]
 
-pyautogui.FAILSAFE = False
+sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:5000/captcha")
 q: queue.Queue[Tuple] = queue.Queue(maxsize=1)
 stop_ev = threading.Event()
 tracker_thread = threading.Thread(
     target=kalman_tracker_worker,
     args=(q, stop_ev),
     kwargs={
-        "source": 1,
-        "roi": (0.025, 0.15, 0.975, 0.66), # ((win.left / 1920), (win.top / 1080), ((win.left + win.width) / 1920), ((win.top + win.height) / 1080)), 
+        "source": sp,
+        "roi": (0.0, 0.18, 1.0, 0.95),
         "max_dist": 150,
         "max_misses": 60,
-        "put_timeout": 0.01
+        "put_timeout": 0.01,
+        "show_window": True
     },
     daemon=True
 )
@@ -122,13 +121,10 @@ try:
         for cid in click_ids:
             obj = next((r for r in valid_readings if r["id"] == cid), None)
             if obj:
-                w, h = win.width, win.height - 38 # 38 is the top bar thickness
-                x, y = obj["cx"] / frame_w, obj["cy"] / frame_h
-                screen_x = int(win.left + x * w)
-                screen_y = int(win.top + 38 + y * h)
-                pyautogui.moveTo(screen_x, screen_y, duration=(random.randrange(80, 160) * 0.001), tween=jitter_tween)
-                pyautogui.mouseDown(duration=(random.randrange(20, 50) * 0.001))
-                pyautogui.mouseUp()
+                x, y = obj["cx"], obj["cy"]
+                sp.moveTo(x, y, duration=(random.randrange(80, 160) * 0.001), tween=jitter_tween)
+                sp.mouseDown(duration=(random.randrange(20, 50) * 0.001))
+                sp.mouseUp()
 
 finally:
     stop_ev.set()

@@ -5,9 +5,10 @@ import queue
 import threading
 import time
 from typing import Tuple, List, Dict, Generator, Optional
+from selenium_portal import SeleniumPortal
 
 def kalman_tracker(
-    source: int = 1,
+    source: SeleniumPortal = None,
     roi: Tuple[float, float, float, float] = (0, 0, 1, 1),
     bg_history: int = 1000,
     varThreshold: int = 50,
@@ -20,7 +21,7 @@ def kalman_tracker(
     stop_event: Optional[threading.Event] = None,
     skip: int = 30,
 ) -> Generator[Tuple[np.ndarray, List[Dict]], None, None]:
-    cap = cv2.VideoCapture(source)
+    cap = source or SeleniumPortal("http://127.0.0.1:5000/captcha")
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video source {source}")
     
@@ -229,7 +230,7 @@ def kalman_tracker(
 def kalman_tracker_worker(
     output_q: queue.Queue[Tuple[np.ndarray, List[Dict]]],
     stop_event: threading.Event,
-    source: int = 1,
+    source: SeleniumPortal = None,
     roi: Tuple[float, float, float, float] = (0, 0, 1, 1),
     bg_history: int = 1000,
     varThreshold: int = 50,
@@ -237,10 +238,14 @@ def kalman_tracker_worker(
     max_misses: int = 60,
     min_area: float = 10.0,
     put_timeout: float = 0.02,
+    show_window: bool = False,
 ):
     """
     threadable worker utilising a queue
     """
+    if show_window:
+        cv2.namedWindow("Tracker View", cv2.WINDOW_NORMAL)
+
     gen = kalman_tracker(
         source=source,
         roi=roi,
@@ -249,7 +254,7 @@ def kalman_tracker_worker(
         max_dist=max_dist,
         max_misses=max_misses,
         min_area=min_area,
-        stop_event=stop_event,
+        stop_event=stop_event
     )
 
     try:
@@ -264,6 +269,18 @@ def kalman_tracker_worker(
                 except queue.Empty:
                     pass
                 output_q.put((frame, roi, readings), timeout=put_timeout)
+            if show_window:
+                vis = frame.copy()
+                for r in readings:
+                    cx, cy = int(r["cx"]), int(r["cy"])
+                    cv2.circle(vis, (cx, cy), 6, (0, 255, 0), 2)
+                    cv2.putText(vis, f'ID {r["id"]}', (cx + 8, cy - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    if hasattr(source, "_pos"):
+                        cv2.circle(vis, source._pos, 3, (255, 0, 0), 2)
+                cv2.imshow("Tracker View", vis)
+                if cv2.waitKey(1) & 0xFF == 27:
+                    stop_event.set()
+                    break
     finally:
         try:
             gen.close()
@@ -274,12 +291,13 @@ def kalman_tracker_worker(
 if __name__ == "__main__":
     import sys
 
+    portal = SeleniumPortal("http://127.0.0.1:5000/captcha")
     q: queue.Queue[Tuple[np.ndarray, List[Dict]]] = queue.Queue(maxsize=1)
     stop_ev = threading.Event()
     worker = threading.Thread(
         target=kalman_tracker_worker,
         args=(q, stop_ev),
-        kwargs={"source": 1, "roi": (0.025, 0.15, 0.975, 0.66), "max_dist": 150, "max_misses": 60, "put_timeout": 0.02},
+        kwargs={"source": portal, "roi": (0.0, 0.18, 1.0, 0.95), "max_dist": 150, "max_misses": 60, "put_timeout": 0.02, "show_window": True},
         daemon=True,
     )
     worker.start()
@@ -291,17 +309,9 @@ if __name__ == "__main__":
             except queue.Empty:
                 continue
 
-            for r in readings:
-                cx, cy = int(r["cx"]), int(r["cy"])
-                cv2.circle(frame, (cx, cy), 6, (0, 255, 0), 2)
-                cv2.putText(frame, f'ID {r["id"]}', (cx + 8, cy - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-
-            cv2.imshow("Tracker View", frame)
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
-
     finally:
         stop_ev.set()
         worker.join(timeout=2.0)
+        portal.release()
         cv2.destroyAllWindows()
         sys.exit(0)

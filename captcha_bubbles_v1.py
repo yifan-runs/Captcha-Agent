@@ -313,7 +313,7 @@ def main():
         if game.state in ("PASSED", "FAILED") and now >= game.result_display_until:
             if game.state == "PASSED":
                 pygame.quit()
-                sys.exit()
+                sys.exit(0)
             else:
                 attempts += 1
                 if attempts <= 2:
@@ -321,7 +321,7 @@ def main():
                     last_time = pygame.time.get_ticks() / 1000.0
                     continue
                 pygame.quit()
-                sys.exit()
+                sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -43,6 +43,21 @@ function randomVelocity() {
   return [vx, vy];
 }
 
+// ===== Fingerprinting event log =====
+const events = [];
+
+function nowSeconds() {
+  return performance.now() / 1000;
+}
+
+function logEvent(type, extra = {}) {
+  events.push({
+    type,
+    time: nowSeconds(),
+    ...extra,
+  });
+}
+
 class Bubble {
   constructor(id, x, y, radius, color_name) {
     this.id = id;
@@ -114,6 +129,11 @@ function initGame() {
   const instruction = generateInstruction();
   const now = performance.now() / 1000;
 
+  // reset fingerprint events for this attempt
+  events.length = 0;
+  logEvent("session_start");
+  logEvent("instruction_shown", { text: instruction.text });
+
   const DISTINCT_RADII = [15, 30, 50, 65, 80]; // fixed distinct sizes
   const radii = [...DISTINCT_RADII];
   radii.sort(() => Math.random() - 0.5); // shuffle for randomness
@@ -170,6 +190,7 @@ function initGame() {
 
 function handleClick(mx, my) {
   if (game.state != "RUNNING") return;
+
   let clicked = null;
   for (const b of game.bubbles) {
     if (b.isClicked(mx, my)) {
@@ -177,27 +198,52 @@ function handleClick(mx, my) {
       break;
     }
   }
-  if (!clicked) return;
+
+  // no bubble hit -> empty click
+  if (!clicked) {
+    logEvent("empty_click", { mx, my });
+    return;
+  }
+
   const size = clicked.radius;
   const prev = game.clicked_sizes.length
     ? game.clicked_sizes[game.clicked_sizes.length - 1]
     : null;
+
+  let is_correct = true;
+
   if (prev !== null) {
     if (game.instruction.direction == "ascending" && size <= prev) {
-      game.state = "FAILED";
-      game.end_time = performance.now() / 1000;
-      clicked.alive = false;
-      return;
+      is_correct = false;
     }
     if (game.instruction.direction == "descending" && size >= prev) {
-      game.state = "FAILED";
-      game.end_time = performance.now() / 1000;
-      clicked.alive = false;
-      return;
+      is_correct = false;
     }
   }
+
+  // log the bubble click for fingerprinting
+  logEvent("bubble_click", {
+    mx,
+    my,
+    bubble_id: clicked.id,
+    bubble_color: clicked.color_name,
+    bubble_size: clicked.radius,
+    bubble_center: [clicked.x, clicked.y],
+    clicked_so_far: [...game.clicked_sizes],
+    is_correct,
+  });
+
+  // game logic
+  if (!is_correct) {
+    game.state = "FAILED";
+    game.end_time = performance.now() / 1000;
+    clicked.alive = false;
+    return;
+  }
+
   game.clicked_sizes.push(size);
   clicked.alive = false;
+
   if (game.clicked_sizes.length >= game.instruction.count) {
     game.state = "PASSED";
     game.end_time = performance.now() / 1000;
@@ -253,6 +299,13 @@ function drawResult() {
   ctx.fillText(text, (WIDTH - metrics.width) / 2, HEIGHT - 24);
 }
 
+canvas.addEventListener("mousemove", (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  logEvent("move", { mx, my });
+});
+
 canvas.addEventListener("click", (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
@@ -263,6 +316,20 @@ canvas.addEventListener("click", (e) => {
 game = initGame();
 
 let lastTime = performance.now() / 1000;
+
+function sendFingerprintToServer(events, features, classification) {
+  fetch("/log_fingerprint", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      events,
+      features,
+      classification,
+    }),
+  }).catch((err) => {
+    console.error("Failed to log fingerprint:", err);
+  });
+}
 
 function loop() {
   const now = performance.now() / 1000;
@@ -293,19 +360,53 @@ function loop() {
     if (!game.result_logged) {
       game.result_logged = true;
       game.result_display_until = now + RESULT_DISPLAY_TIME;
+
+      // mark end of session for fingerprinting
+      logEvent("captcha_result", {
+        result: game.state,
+        clicked_sizes: [...game.clicked_sizes],
+        attempts,
+      });
+      logEvent("session_end");
     } else if (now >= game.result_display_until) {
-      if (game.state == "PASSED") {
-        alert("CAPTCHA Passed! You may proceed.");
+      // === FINGERPRINTING: compute features + classification ===
+      const features = computeFeaturesFromEvents(events);
+      const classification = classifyFingerprint(
+        features,
+        game.state === "PASSED"
+      );
+
+      // send to backend file
+      sendFingerprintToServer(events, features, classification);
+
+      const isHuman = classification.is_human;
+
+      // ───────── CASE 1: correct bubbles + human-like behaviour ─────────
+      if (game.state === "PASSED" && isHuman) {
+        alert("CAPTCHA Passed! Human verified, you may proceed.");
         return;
-      } else {
+      }
+
+      // ───────── CASE 2: wrong bubbles (any behaviour) ─────────
+      if (game.state === "FAILED") {
         attempts++;
         if (attempts <= 2) {
+          // allow retry for normal mistakes
           game = initGame();
           lastTime = performance.now() / 1000;
         } else {
+          // final fail after max attempts
           alert("CAPTCHA Failed. Try again later.");
           return;
         }
+        // no return here -> let the loop continue and draw the new game
+      }
+
+      // ───────── CASE 3: PASSED but classified as bot ─────────
+      // (correct bubbles + non-human behaviour)
+      if (game.state === "PASSED" && !isHuman) {
+        alert("CAPTCHA Failed. Try again later.");
+        return;
       }
     }
   }

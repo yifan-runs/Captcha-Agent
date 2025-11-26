@@ -30,8 +30,8 @@ def launch_login_page(url=" http://127.0.0.1:5000"):
 # Step 2: Fill username & password
 # ------------------------------
 def fill_credentials(driver):
-    user = random_string()
-    password = random_string()
+    user = "User123"
+    password = "Password123!"
 
     driver.find_element(By.ID, "username").send_keys(user)
     driver.find_element(By.ID, "password").send_keys(password)

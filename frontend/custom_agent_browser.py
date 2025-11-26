@@ -39,11 +39,11 @@ if platform.system() == "Darwin":
 # -------------------------
 WINDOW_TITLE_SUBSTR = "Bubble CAPTCHA"
 HUD_HEIGHT = 56
-HUD_LEFT_MARGIN = 10
-HUD_RIGHT_MARGIN = 10
+HUD_LEFT_MARGIN = 11
+HUD_RIGHT_MARGIN = 11
 PLAY_TOP_MARGIN = 12         # distance from HUD bottom to play area (approx)
 PLAY_BOTTOM_MARGIN = 40      # footer area size in your game
-TRACK_FPS = 20
+TRACK_FPS = 25
 CLICK_DELAY = 0.12
 MAX_OCR_ATTEMPTS = 20
 
@@ -63,12 +63,14 @@ COLOR_MAP = {
 }
 
 shared_state = {
-    "instruction": None,    # { "text", "no_of_bubbles", "bubble_order" }
-    "bubbles": [],          # tracked bubbles (absolute screen coords)
+    "instruction": None,
+    "bubbles": [],
     "events": [],
     "running": True,
     "window_coords": None,
+    "captcha_failed": False,
 }
+
 
 # -------------------------
 # Logging
@@ -101,7 +103,7 @@ def ensure_tesseract():
 # -------------------------
 # Bézier mouse movement — REPLACED WITH FAST VERSION
 # -------------------------
-def bezier_move_mouse(start_x, start_y, end_x, end_y, duration_override=None, max_time=0.06):
+def bezier_move_mouse(start_x, start_y, end_x, end_y, duration_override=None, max_time=0.04):
     """
     Fast human-like movement along a cubic Bézier curve.
       - Uses a small number of steps and issues moveTo() with duration per step
@@ -119,7 +121,7 @@ def bezier_move_mouse(start_x, start_y, end_x, end_y, duration_override=None, ma
         duration = max(0.01, float(duration_override))
     else:
         # base scale: shorter divisor -> faster overall. tuned for speed.
-        duration = min(max_time, max(0.01, dist / 1300.0))
+        duration = min(max_time, max(0.01, dist / 1350.0))
 
     # control points produce a small curvature
     cp1 = (sx + dx * 0.28 + random.uniform(-6, 6), sy + dy * 0.28 + random.uniform(-6, 6))
@@ -146,6 +148,15 @@ def bezier_move_mouse(start_x, start_y, end_x, end_y, duration_override=None, ma
         # per-step duration ensures smooth OS-level interpolation
         per_step_dur = duration / steps
         try:
+            cx1, cy1 = shared_state["window_coords"]["x"] + 10, shared_state["window_coords"]["y"]
+            cx2 = cx1 + shared_state["window_coords"]["width"] - 20
+            cy2 = cy1 + shared_state["window_coords"]["height"]
+
+            # Ensure click inside
+            if not (cx1 <= tx <= cx2 and cy1 <= ty <= cy2):
+                print("[WARN] Prevented click outside canvas")
+                continue
+
             pyautogui.moveTo(int(x), int(y), duration=per_step_dur)
         except Exception:
             # fallback to instantaneous move if moveTo fails
@@ -236,6 +247,19 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
             r"captcha\s+assed",
             r"you\s+may\s+proceed"
         ]
+        
+        # --- FAILURE DETECTION ---
+        fail_patterns = [
+            r"captcha\s+failed",
+            r"try\s+again",
+            r"incorrect"
+        ]
+
+        if any(re.search(p, text.lower()) for p in fail_patterns):
+            print("[OCR] CAPTCHA failure detected!")
+            shared_state["captcha_failed"] = True
+            return
+
 
         if any(re.search(p, text.lower()) for p in success_patterns):
             print("[OCR] CAPTCHA success detected!")
@@ -300,6 +324,12 @@ def bubble_tracking_thread():
         w - 20,
         h - HUD_HEIGHT - PLAY_TOP_MARGIN - PLAY_BOTTOM_MARGIN
     )
+    canvas_x1 = play_region[0]
+    canvas_y1 = play_region[1]
+    canvas_x2 = play_region[0] + play_region[2]
+    canvas_y2 = play_region[1] + play_region[3]
+
+    shared_state["canvas_bounds"] = (canvas_x1, canvas_y1, canvas_x2, canvas_y2)
 
     while shared_state["running"]:
         try:
@@ -323,6 +353,10 @@ def bubble_tracking_thread():
             circles = np.uint16(np.around(circles))
             for c in circles[0, :]:
                 cx, cy, r = c
+                h, w, _ = frame.shape
+                cy = max(0, min(cy, h - 1))
+                cx = max(0, min(cx, w - 1))
+
                 color = color_name_from_bgr(frame[cy, cx])
                 detected.append({"x": cx, "y": cy, "r": r, "color_name": color})
 
@@ -361,6 +395,9 @@ def bubble_tracking_thread():
 # Clicker Thread (Updated with FAST Bézier movement)
 # -------------------------
 def choose_targets_and_click():
+    last_burst_sizes = []
+
+    # wait for instruction
     while shared_state["running"] and shared_state.get("instruction") is None:
         time.sleep(0.1)
 
@@ -371,78 +408,88 @@ def choose_targets_and_click():
     needed = instr["no_of_bubbles"]
     order = instr["bubble_order"]
 
-    # allow tracker to populate
-    time.sleep(0.5)
-    bubbles = list(shared_state["bubbles"])
+    print("[CLICKER] Starting persistent clicking loop…")
 
-    uniq = {}
-    for b in bubbles:
-        uniq[b["id"]] = b
-    bubbles = list(uniq.values())
-    # sort by radius so ascending/descending is stable
-    bubbles.sort(key=lambda x: x["r"])
+    while shared_state["running"] and not shared_state["captcha_failed"]:
 
-    # choose targets (your existing logic can go here or the ANY-combo logic)
-    if order == "ascending":
-        targets = bubbles[:needed]
-    else:
-        targets = sorted(bubbles[-needed:], key=lambda x: x["r"], reverse=True)
+        # get canvas bounds safely
+        cx1, cy1, cx2, cy2 = shared_state.get("canvas_bounds", (0,0,9999,9999))
 
-    print("[CLICKER] targets chosen:")
-    for t in targets:
-        print(" id:", t["id"], "r:", t["r"], "pos:", (t["x"], t["y"]), "color:", t.get("color_name"))
-
-    for t in targets:
-        cur = list(shared_state["bubbles"])
-        match = next((b for b in cur if b["id"] == t["id"]), None)
-        if match is None:
-            # fallback nearest by distance
-            best, bestd = None, float("inf")
-            for cb in cur:
-                d = math.hypot(cb["x"] - t["x"], cb["y"] - t["y"])
-                if d < bestd:
-                    bestd = d
-                    best = cb
-            match = best
-
-        if match is None:
-            print("[CLICKER] couldn't find match; skipping.")
+        bubbles = list(shared_state["bubbles"])
+        if not bubbles:
+            time.sleep(0.05)
             continue
 
-        # pick a random point *inside* the bubble (reduces misses due to edge-detection)
-        radius = max(2, match.get("r", 10))
-        offset_x = random.uniform(-0.25 * radius, 0.25 * radius)
-        offset_y = random.uniform(-0.25 * radius, 0.25 * radius)
-        target_x = int(match["x"] + offset_x)
-        target_y = int(match["y"] + offset_y)
+        # de-duplicate by ID
+        uniq = {b["id"]: b for b in bubbles}
+        bubbles = list(uniq.values())
 
-        try:
-            # start from current cursor (fetch once)
-            sx, sy = pyautogui.position()
+        bubbles.sort(key=lambda x: x["r"])
 
-            # very fast bezier move (max_time tuned above)
-            bezier_move_mouse(sx, sy, target_x, target_y, duration_override=None, max_time=0.06)
+        # Filter based on last burst size
+        if last_burst_sizes:
+            last_size = last_burst_sizes[-1]
 
-            # tiny pause to let the OS settle (very short)
-            time.sleep(random.uniform(0.008, 0.03))
+            if order == "ascending":
+                bubbles = [b for b in bubbles if b["r"] > last_size]
+            else:
+                bubbles = [b for b in bubbles if b["r"] < last_size]
 
-            # final tiny jiggle before click (very small)
-            if random.random() < 0.3:
-                jig_x = target_x + random.uniform(-0.8, 0.8)
-                jig_y = target_y + random.uniform(-0.8, 0.8)
-                try:
-                    pyautogui.moveTo(int(jig_x), int(jig_y), duration=0)
-                except Exception:
-                    pass
+        # If no valid bubbles left, wait
+        if not bubbles:
+            time.sleep(0.05)
+            continue
 
-            pyautogui.click()
-            time.sleep(CLICK_DELAY)
-            log_event("click_done", target_id=match["id"], x=target_x, y=target_y)
-        except Exception as e:
-            print("[CLICKER] click failed:", e)
+        # Pick next targets
+        if order == "ascending":
+            targets = bubbles[:needed]
+        else:
+            targets = sorted(bubbles[-needed:], key=lambda x: x["r"], reverse=True)
 
-    print("[CLICKER] finished.")
-    log_event("clicker_done", targets=[t["id"] for t in targets])
+        # Click each
+        for t in targets:
+            if not shared_state["running"] or shared_state["captcha_failed"]:
+                break
+
+            cur = list(shared_state["bubbles"])
+            match = next((b for b in cur if b["id"] == t["id"]), None)
+            if match is None:
+                continue
+
+            radius = max(2, match.get("r", 10))
+            offset_x = random.uniform(-0.25 * radius, 0.25 * radius)
+            offset_y = random.uniform(-0.25 * radius, 0.25 * radius)
+            tx = int(match["x"] + offset_x)
+            ty = int(match["y"] + offset_y)
+
+            # prevent clicks outside game canvas
+            if not (cx1 <= tx <= cx2 and cy1 <= ty <= cy2):
+                print("[WARN] Prevented click outside canvas")
+                continue
+
+            try:
+                sx, sy = pyautogui.position()
+                bezier_move_mouse(sx, sy, tx, ty, duration_override=None, max_time=0.06)
+                pyautogui.click()
+
+                # store size
+                last_burst_sizes.append(match["r"])
+
+                time.sleep(CLICK_DELAY)
+            except Exception:
+                pass
+
+        time.sleep(0.05)
+    # before the final print for troubleshooting
+    if shared_state.get("captcha_failed"):
+        print("[CLICKER] Exiting because captcha_failed=True")
+    elif not shared_state.get("running"):
+        print("[CLICKER] Exiting because running=False")
+    else:
+        print("[CLICKER] Exiting (unknown reason)")
+        
+    print("[CLICKER] exiting persistent clicker loop.")
+
 # -------------------------
 # Main Runner
 # -------------------------
@@ -459,6 +506,8 @@ def main():
         shared_state["instruction"] = None
         shared_state["bubbles"] = []
         shared_state["running"] = True
+        # IMPORTANT: reset failure flag for a clean new round
+        shared_state["captcha_failed"] = False
 
         t_track = threading.Thread(target=bubble_tracking_thread, daemon=True)
         t_ocr = threading.Thread(target=ocr_read_hud_thread, daemon=True)
@@ -468,16 +517,36 @@ def main():
         t_ocr.start()
         t_click.start()
 
-        t_ocr.join(timeout=40)
-        t_click.join(timeout=30)
+
+        round_start = time.time()
+
+        while True:
+            if time.time() - round_start > 20:
+                print("[MAIN] 20s round timeout — restarting.")
+                shared_state["captcha_failed"] = True
+                break
+
+            if shared_state["captcha_failed"]:
+                print("[MAIN] CAPTCHA fail detected — restarting.")
+                break
+
+            if not shared_state["running"]:
+                break
+
+            time.sleep(0.1)
+
 
         shared_state["running"] = False
         t_track.join(timeout=2)
 
-        if shared_state.get("instruction") is None:
-            # OCR detected success, stop restarting
+        if shared_state.get("instruction") is None and not shared_state["captcha_failed"]:
             print("CAPTCHA passed. Agent terminating.")
             break
+
+        if shared_state["captcha_failed"]:
+            print("CAPTCHA failed. Restarting round...")
+            continue
+
 
         time.sleep(1)
         print("Round finished. Restarting...")

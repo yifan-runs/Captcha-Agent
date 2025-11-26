@@ -299,10 +299,10 @@ class HeadlessBubbleAttacker:
                     "data-captcha-result"
                 )
                 if result == "success":
-                    print("🎉 Verification successful!")
+                    print("Verification successful!")
                     return True
                 elif result == "failed":
-                    print("❌ Verification failed")
+                    print("Verification failed")
                     return False
             except:
                 pass
@@ -315,17 +315,17 @@ class HeadlessBubbleAttacker:
                 for banner in result_banners:
                     text = banner.text.lower()
                     if "success" in text or "passed" in text:
-                        print("🎉 Verification successful!")
+                        print("Verification successful!")
                         return True
                     elif "fail" in text or "error" in text:
-                        print("❌ Verification failed")
+                        print("Verification failed")
                         return False
             except:
                 pass
 
             time.sleep(0.5)
 
-        print("⏰ Result wait timeout")
+        print("Result wait timeout")
         return False
 
     def run_attack(self):
@@ -392,6 +392,6 @@ if __name__ == "__main__":
     success = attacker.run_attack()
 
     if success:
-        print("🎊 Attack completed successfully!")
+        print("Attack completed successfully!")
     else:
-        print("💥 Attack failed")
+        print("Attack failed")

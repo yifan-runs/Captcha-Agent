@@ -6,9 +6,7 @@ const FP_MAX_DURATION = 20.0;
 function computeFeaturesFromEvents(events) {
   const feats = {};
 
-  const evs = [...events].sort(
-    (a, b) => (a.time ?? 0.0) - (b.time ?? 0.0)
-  );
+  const evs = [...events].sort((a, b) => (a.time ?? 0.0) - (b.time ?? 0.0));
   if (!evs.length) return feats;
 
   const moves = evs.filter(
@@ -25,7 +23,9 @@ function computeFeaturesFromEvents(events) {
   const endEvs = evs.filter((e) => e.type === "session_end");
 
   const tStart = startEvs.length ? startEvs[0].time : evs[0].time;
-  const tEnd = endEvs.length ? endEvs[endEvs.length - 1].time : evs[evs.length - 1].time;
+  const tEnd = endEvs.length
+    ? endEvs[endEvs.length - 1].time
+    : evs[evs.length - 1].time;
   const totalTime = Math.max(0.0, tEnd - tStart);
 
   // A. Timing
@@ -54,8 +54,7 @@ function computeFeaturesFromEvents(events) {
     }
     const meanIci = intervals.reduce((a, b) => a + b, 0) / intervals.length;
     const varIci =
-      intervals.reduce((s, d) => s + (d - meanIci) ** 2, 0) /
-      intervals.length;
+      intervals.reduce((s, d) => s + (d - meanIci) ** 2, 0) / intervals.length;
     const stdIci = Math.sqrt(varIci);
     feats.ici_mean = meanIci;
     feats.ici_cv = stdIci / (meanIci + 1e-6);
@@ -65,13 +64,8 @@ function computeFeaturesFromEvents(events) {
   }
 
   // B. Movement / path
-  const {
-    avg_speed,
-    max_speed,
-    curvature_mean,
-    teleport_fraction,
-    speed_std,
-  } = pathFeatures(moves, clicks);
+  const { avg_speed, max_speed, curvature_mean, teleport_fraction, speed_std } =
+    pathFeatures(moves, clicks);
   feats.avg_speed = avg_speed;
   feats.max_speed = max_speed;
   feats.curvature_mean = curvature_mean;
@@ -102,21 +96,14 @@ function computeFeaturesFromEvents(events) {
 
   const totalClicks = clicks.length;
   feats.total_clicks = totalClicks;
-  feats.empty_click_ratio =
-    totalClicks > 0 ? emptyClicks / totalClicks : 0.0;
-  feats.clicks_per_second =
-    totalTime > 0 ? totalClicks / totalTime : 0.0;
+  feats.empty_click_ratio = totalClicks > 0 ? emptyClicks / totalClicks : 0.0;
+  feats.clicks_per_second = totalTime > 0 ? totalClicks / totalTime : 0.0;
 
   // E. Exploration / attention
-  const visitedInstr = moves.some(
-    (e) => e.my >= 0 && e.my <= 60
-  );
+  const visitedInstr = moves.some((e) => e.my >= 0 && e.my <= 60);
   feats.visited_instruction_area = visitedInstr ? 1.0 : 0.0;
 
-  feats.pre_first_click_path_length = preFirstClickPath(
-    moves,
-    firstClickTime
-  );
+  feats.pre_first_click_path_length = preFirstClickPath(moves, firstClickTime);
 
   // G. Performance level
   feats.attempts_count = 1.0;
@@ -164,8 +151,7 @@ function pathFeatures(moves, clicks) {
     max_speed = Math.max(...speeds);
     const meanV = avg_speed;
     const varV =
-      speeds.reduce((s, v) => s + (v - meanV) ** 2, 0) /
-      speeds.length;
+      speeds.reduce((s, v) => s + (v - meanV) ** 2, 0) / speeds.length;
     speed_std = Math.sqrt(varV);
     teleport_fraction = teleports / speeds.length;
   }
@@ -176,9 +162,7 @@ function pathFeatures(moves, clicks) {
     for (let i = 0; i < clicks.length - 1; i++) {
       const tStart = clicks[i].time;
       const tEnd = clicks[i + 1].time;
-      const segment = moves.filter(
-        (m) => m.time >= tStart && m.time <= tEnd
-      );
+      const segment = moves.filter((m) => m.time >= tStart && m.time <= tEnd);
       if (segment.length < 2) continue;
       let pathLen = 0.0;
       for (let j = 0; j < segment.length - 1; j++) {
@@ -222,11 +206,9 @@ function clickOffsets(clicks) {
   if (!offsets.length) {
     return { offset_mean: 0.0, offset_std: 0.0 };
   }
-  const meanOff =
-    offsets.reduce((a, b) => a + b, 0) / offsets.length;
+  const meanOff = offsets.reduce((a, b) => a + b, 0) / offsets.length;
   const varOff =
-    offsets.reduce((s, d) => s + (d - meanOff) ** 2, 0) /
-    offsets.length;
+    offsets.reduce((s, d) => s + (d - meanOff) ** 2, 0) / offsets.length;
   const stdOff = Math.sqrt(varOff);
   return { offset_mean: meanOff, offset_std: stdOff };
 }
@@ -371,12 +353,7 @@ function classifyFingerprint(features, captchaPassed) {
     reasons.push("speed_pattern_too_stable");
   }
 
-  if (
-    off_mean < 3.0 &&
-    off_std < 1.5 &&
-    ici_cv < 0.12 &&
-    ici_mean < 0.45
-  ) {
+  if (off_mean < 3.0 && off_std < 1.5 && ici_cv < 0.12 && ici_mean < 0.45) {
     suspicious = true;
     reasons.push("precision_plus_regular_timing");
     risk += 0.2;

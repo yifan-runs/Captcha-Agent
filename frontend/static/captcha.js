@@ -189,9 +189,8 @@ function initGame() {
 }
 
 function handleClick(mx, my) {
-  if (game.state !== "RUNNING") return;
- 
-  // Iterate from top-most to bottom-most (reverse draw order)
+  if (game.state != "RUNNING") return;
+
   let clicked = null;
   for (let i = game.bubbles.length - 1; i >= 0; i--) {
     const b = game.bubbles[i];
@@ -201,48 +200,52 @@ function handleClick(mx, my) {
       break;
     }
   }
- 
-  if (!clicked) return;
- 
-  // Compute distance from click → bubble centre
-  const dx = mx - clicked.x;
-  const dy = my - clicked.y;
-  const dist = Math.sqrt(dx * dx + dy * dy);
- 
-  // LOGGING INFO HERE ⬇️
-  console.log("📍 Bubble Popped:");
-  console.log("   Bubble ID:", clicked.id);
-  console.log("   Bubble Center:", { x: clicked.x, y: clicked.y });
-  console.log("   Click Position:", { x: mx, y: my });
-  console.log("   Distance (click → centre):", dist.toFixed(2));
-  console.log("   Bubble Radius:", clicked.radius);
-  console.log("   Timestamp:", performance.now().toFixed(2));
-  console.log("-------------------------------------------");
- 
-  // VALIDATION LOGIC
+
+  // no bubble hit -> empty click
+  if (!clicked) {
+    logEvent("empty_click", { mx, my });
+    return;
+  }
+
   const size = clicked.radius;
   const prev = game.clicked_sizes.length
     ? game.clicked_sizes[game.clicked_sizes.length - 1]
     : null;
- 
+
+  let is_correct = true;
+
   if (prev !== null) {
-    if (game.instruction.direction === "ascending" && size <= prev) {
-      game.state = "FAILED";
-      game.end_time = performance.now() / 1000;
-      clicked.alive = false;
-      return;
+    if (game.instruction.direction == "ascending" && size <= prev) {
+      is_correct = false;
     }
-    if (game.instruction.direction === "descending" && size >= prev) {
-      game.state = "FAILED";
-      game.end_time = performance.now() / 1000;
-      clicked.alive = false;
-      return;
+    if (game.instruction.direction == "descending" && size >= prev) {
+      is_correct = false;
     }
   }
- 
+
+  // log the bubble click for fingerprinting
+  logEvent("bubble_click", {
+    mx,
+    my,
+    bubble_id: clicked.id,
+    bubble_color: clicked.color_name,
+    bubble_size: clicked.radius,
+    bubble_center: [clicked.x, clicked.y],
+    clicked_so_far: [...game.clicked_sizes],
+    is_correct,
+  });
+
+  // game logic
+  if (!is_correct) {
+    game.state = "FAILED";
+    game.end_time = performance.now() / 1000;
+    clicked.alive = false;
+    return;
+  }
+
   game.clicked_sizes.push(size);
   clicked.alive = false;
- 
+
   if (game.clicked_sizes.length >= game.instruction.count) {
     game.state = "PASSED";
     game.end_time = performance.now() / 1000;
@@ -380,7 +383,7 @@ function loop() {
       const captchaPassed = game.state === "PASSED";
       const isHuman = !!classification.is_human;
       const finalAllowed = captchaPassed && isHuman; // only true in the “real human + correct” case
-      const attemptIndex = attempts + 1;            // this run is the (attempts+1)-th attempt
+      const attemptIndex = attempts + 1; // this run is the (attempts+1)-th attempt
 
       // send to backend file with metadata
       sendFingerprintToServer(events, features, classification, {

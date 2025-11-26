@@ -191,6 +191,7 @@ function initGame() {
 function handleClick(mx, my) {
   if (game.state != "RUNNING") return;
 
+  // Iterate from top-most to bottom-most (reverse draw order)
   let clicked = null;
   for (let i = game.bubbles.length - 1; i >= 0; i--) {
     const b = game.bubbles[i];
@@ -200,6 +201,14 @@ function handleClick(mx, my) {
       break;
     }
   }
+
+  //let clicked = null;
+  //for (const b of game.bubbles) {
+    //if (b.isClicked(mx, my)) {
+      //clicked = b;
+      //break;
+    //}
+  //}
 
   // no bubble hit -> empty click
   if (!clicked) {

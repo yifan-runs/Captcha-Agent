@@ -292,7 +292,7 @@ def bubble_tracking_thread():
 
     x, y, w, h = coords["x"], coords["y"], coords["width"], coords["height"]
     title_offset = 0 if platform.system() == "Darwin" else 30
-    automation_bar_height = 35  # estimated for Selenium/Chrome
+    automation_bar_height = 30  # estimated for Selenium/Chrome
     title_offset += automation_bar_height
     play_region = (
         x + 10,

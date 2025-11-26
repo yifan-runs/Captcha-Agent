@@ -1,35 +1,39 @@
+#!/usr/bin/env python3
 import pygame
 import random
 import sys
 import math
+import json
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
+
+# fingerprinting module
+import fingerprinting_v3
 
 pygame.init()
 
 WIDTH, HEIGHT = 600, 350
 FPS = 60
 
-MAX_DURATION = 20.0 
-
-TOTAL_SPAWNS = 18
-MIN_SPAWN_INTERVAL = 0.8
-MAX_SPAWN_INTERVAL = 1.3
-MAX_SIMULTANEOUS_BUBBLES = 5
-
-MIN_SPEED = 40
-MAX_SPEED = 70
+MAX_DURATION = 20.0
+RESULT_DISPLAY_TIME = 1.5
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 
 COLOR_MAP = {
-    "BLUE":   (80, 160, 255),
-    "RED":    (230, 80, 80),
-    "GREEN":  (80, 200, 120),
-    "YELLOW": (240, 220, 80),
-    "ORANGE": (245, 170, 80),
+    "BLUE":      (80, 160, 255),
+    "RED":       (230, 70, 70),
+    "GREEN":     (50, 200, 110),
+    "YELLOW":    (255, 235, 80),
+    "ORANGE":    (255, 165, 50),
+    "PURPLE":    (160, 100, 255),
+    "PINK":      (255, 140, 200),
+    "CYAN":      (80, 255, 255),
+    "MAGENTA":   (255, 80, 180),
+    "LIME":      (180, 255, 80),
 }
+
 COLOR_NAMES = list(COLOR_MAP.keys())
 
 BG_TOP = (230, 240, 255)
@@ -43,11 +47,25 @@ FAIL_COLOR = (200, 50, 50)
 TIME_BAR_BG = (220, 230, 245)
 TIME_BAR_FILL = (80, 140, 255)
 
-HUD_HEIGHT = 56 
+HUD_HEIGHT = 56
 
 FONT_TITLE = pygame.font.SysFont("arial", 18, bold=True)
 FONT = pygame.font.SysFont("arial", 16)
 FONT_SMALL = pygame.font.SysFont("arial", 13)
+
+MIN_SPEED = 15
+MAX_SPEED = 35
+MIN_DIFF = 6  # Minimum size difference between bubbles
+
+def random_velocity():
+    vx = 0
+    vy = 0
+    # Require strong movement like friend's code
+    while abs(vx) < 30 and abs(vy) < 30:
+        vx = random.uniform(-120, 120)
+        vy = random.uniform(-120, 120)
+    return vx, vy
+
 
 
 @dataclass
@@ -61,260 +79,169 @@ class Bubble:
     vx: float
     vy: float
     alive: bool = True
-    spawn_side: str = "left"
-    spawn_time: float = 0.0
-    age: float = 0.0
-    wiggle_amp: float = 0.0
-    wiggle_freq: float = 0.0
-    wiggle_axis: str = "y"
 
     def move(self, dt: float):
         if not self.alive:
             return
 
-        self.age += dt
         self.x += self.vx * dt
         self.y += self.vy * dt
 
-        wiggle = math.sin(self.age * self.wiggle_freq) * self.wiggle_amp * dt
-        if self.wiggle_axis == "x":
-            self.x += wiggle
-        else:
-            self.y += wiggle
-
+        # If bubble exits the screen — instantly respawn on a new side (so it re-enters quickly)
         if (self.x < -self.radius or
             self.x > WIDTH + self.radius or
             self.y < -self.radius or
             self.y > HEIGHT + self.radius):
-            self.alive = False
+
+            side = random.choice(["left", "right", "top", "bottom"])
+
+            if side == "left":
+                self.x = -self.radius - 20
+                self.y = random.randint(HUD_HEIGHT + 30, HEIGHT - 40)
+            elif side == "right":
+                self.x = WIDTH + self.radius + 20
+                self.y = random.randint(HUD_HEIGHT + 30, HEIGHT - 40)
+            elif side == "top":
+                self.x = random.randint(50, WIDTH - 50)
+                self.y = HUD_HEIGHT - self.radius - 20
+            else:
+                self.x = random.randint(50, WIDTH - 50)
+                self.y = HEIGHT + self.radius + 20
+
+            # New velocity aimed roughly inward (less center gravity)
+            cx, cy = WIDTH // 2, (HEIGHT + HUD_HEIGHT) // 2
+            dx = cx - self.x
+            dy = cy - self.y
+            dist = math.hypot(dx, dy) or 1.0
+            dx /= dist
+            dy /= dist
+
+            # Add angular noise (reduces center pull)
+            angle = math.atan2(dy, dx)
+            noise = random.uniform(-1.0, 1.0)
+            angle += noise
+
+            speed = random.uniform(40, 80)
+            self.vx = math.cos(angle) * speed
+            self.vy = math.sin(angle) * speed
+
 
     def draw(self, surface: pygame.Surface):
         if not self.alive:
             return
         pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), self.radius)
-        pygame.draw.circle(surface, (0, 0, 0, 40), (int(self.x), int(self.y)), self.radius, 1)
+        # soft outline
+        pygame.draw.circle(surface, (0, 0, 0), (int(self.x), int(self.y)), self.radius, 1)
 
     def is_clicked(self, mx: int, my: int) -> bool:
-        if not self.alive:
-            return False
         dx = mx - self.x
         dy = my - self.y
-        return dx * dx + dy * dy <= self.radius * self.radius
+        return dx * dx + dy * dy <= (self.radius * self.radius)
 
 
 @dataclass
 class Instruction:
     text: str
-    targets: Dict[str, int]
+    count: int
+    direction: str
 
 
 @dataclass
 class GameState:
     instruction: Instruction
     bubbles: List[Bubble] = field(default_factory=list)
-    correct_hits: Dict[str, int] = field(default_factory=dict)
+    clicked_sizes: List[int] = field(default_factory=list)
     state: str = "RUNNING"
     start_time: float = 0.0
     end_time: Optional[float] = None
-
-    next_spawn_at: float = 0.0
-    last_bubble_id: int = 0
-    spawn_plan: List[str] = field(default_factory=list)
-    spawn_index: int = 0
+    result_display_until: float = 0.0
+    result_logged: bool = False
 
     events: List[dict] = field(default_factory=list)
 
     def log_event(self, event_type: str, **kwargs):
+        # include timestamp automatically if not provided
+        if "time" not in kwargs:
+            kwargs["time"] = pygame.time.get_ticks() / 1000.0
         self.events.append({"type": event_type, **kwargs})
 
 
 def generate_instruction() -> Instruction:
-    mode = random.choice(["single", "double"])
-
-    if mode == "single":
-        color = random.choice(COLOR_NAMES)
-        count = random.choice([2, 3])
-        targets = {color: count}
-        text = f"Burst exactly {count} {color} bubble"
-        if count > 1:
-            text += "s"
-        text += ". Do NOT burst any other color."
-        return Instruction(text=text, targets=targets)
-
-    c1, c2 = random.sample(COLOR_NAMES, 2)
-    targets = {c1: 1, c2: 1}
-    text = f"Burst exactly 1 {c1} and 1 {c2} bubble. Do NOT burst any other color."
-    return Instruction(text=text, targets=targets)
-
-
-def make_spawn_plan(instr: Instruction) -> List[str]:
-    PRE_DECOYS = 3
-
-    remaining_slots = TOTAL_SPAWNS
-    target_colors = list(instr.targets.keys())
-    target_pool: List[str] = []
-    decoy_pool: List[str] = []
-
-    for color, required in instr.targets.items():
-        base = required + 2
-        base = min(base, remaining_slots)
-        target_pool.extend([color] * base)
-        remaining_slots -= base
-        if remaining_slots <= 0:
-            break
-
-    non_target_colors = [c for c in COLOR_NAMES if c not in instr.targets]
-    for _ in range(remaining_slots):
-        if non_target_colors:
-            decoy_pool.append(random.choice(non_target_colors))
-        else:
-            decoy_pool.append(random.choice(target_colors))
-
-    plan: List[str] = []
-    last_was_target = False
-
-    while target_pool or decoy_pool:
-        idx = len(plan)
-
-        if idx < PRE_DECOYS and decoy_pool:
-            c = decoy_pool.pop(random.randrange(len(decoy_pool)))
-            plan.append(c)
-            last_was_target = False
-            continue
-
-        if last_was_target and decoy_pool:
-            c = decoy_pool.pop(random.randrange(len(decoy_pool)))
-            plan.append(c)
-            last_was_target = False
-            continue
-
-        if target_pool:
-            c = target_pool.pop(random.randrange(len(target_pool)))
-            plan.append(c)
-            last_was_target = True
-        elif decoy_pool:
-            c = decoy_pool.pop(random.randrange(len(decoy_pool)))
-            plan.append(c)
-            last_was_target = False
-        else:
-            break
-
-    return plan
-
-
-def spawn_bubble(game: GameState, now: float) -> None:
-    if game.spawn_index >= len(game.spawn_plan):
-        return
-
-    color_name = game.spawn_plan[game.spawn_index]
-    color = COLOR_MAP[color_name]
-    radius = random.randint(20, 26)
-
-    margin_x = 70
-    margin_y = HUD_HEIGHT + 20  
-    min_gap = 10
-
-    side = random.choice(["left", "right", "top", "bottom"])
-
-    max_attempts = 15
-    for _ in range(max_attempts):
-        if side == "left":
-            x = -radius
-            y = random.randint(margin_y, HEIGHT - 40)
-            vx = random.uniform(MIN_SPEED, MAX_SPEED)
-            vy = random.uniform(-20, 20)
-            wiggle_axis = "y"
-        elif side == "right":
-            x = WIDTH + radius
-            y = random.randint(margin_y, HEIGHT - 40)
-            vx = -random.uniform(MIN_SPEED, MAX_SPEED)
-            vy = random.uniform(-20, 20)
-            wiggle_axis = "y"
-        elif side == "top":
-            x = random.randint(margin_x, WIDTH - margin_x)
-            y = HUD_HEIGHT + 20 - radius
-            vx = random.uniform(-20, 20)
-            vy = random.uniform(MIN_SPEED, MAX_SPEED)
-            wiggle_axis = "x"
-        else:
-            x = random.randint(margin_x, WIDTH - margin_x)
-            y = HEIGHT - 40 + radius
-            vx = random.uniform(-20, 20)
-            vy = -random.uniform(MIN_SPEED, MAX_SPEED)
-            wiggle_axis = "x"
-
-        overlaps = False
-        for b in game.bubbles:
-            if not b.alive:
-                continue
-            dx = x - b.x
-            dy = y - b.y
-            dist_sq = dx * dx + dy * dy
-            min_dist = radius + b.radius + min_gap
-            if dist_sq < min_dist * min_dist:
-                overlaps = True
-                break
-        if not overlaps:
-            break
-
-    bubble_id = game.last_bubble_id + 1
-    game.last_bubble_id = bubble_id
-    game.spawn_index += 1
-
-    wiggle_amp = random.uniform(15, 25)
-    wiggle_freq = random.uniform(2.0, 3.5)
-
-    bubble = Bubble(
-        id=bubble_id,
-        x=x,
-        y=y,
-        radius=radius,
-        color_name=color_name,
-        color=color,
-        vx=vx,
-        vy=vy,
-        spawn_side=side,
-        spawn_time=now,
-        wiggle_amp=wiggle_amp,
-        wiggle_freq=wiggle_freq,
-        wiggle_axis=wiggle_axis,
+    count = random.choice([2, 3])
+    direction = random.choice(["ascending", "descending"])
+    return Instruction(
+        text=f"Burst any {count} bubbles in {direction} order of size.",
+        count=count,
+        direction=direction
     )
-    game.bubbles.append(bubble)
-
-
-def maybe_spawn_bubbles(game: GameState, now: float):
-    if game.state != "RUNNING":
-        return
-
-    elapsed = now - game.start_time
-    if elapsed > MAX_DURATION:
-        return
-
-    alive_count = sum(1 for b in game.bubbles if b.alive)
-    if alive_count >= MAX_SIMULTANEOUS_BUBBLES:
-        return
-
-    if game.spawn_index >= len(game.spawn_plan):
-        return
-
-    if now >= game.next_spawn_at:
-        spawn_bubble(game, now)
-        interval = random.uniform(MIN_SPAWN_INTERVAL, MAX_SPAWN_INTERVAL)
-        game.next_spawn_at = now + interval
 
 
 def init_game() -> GameState:
     instruction = generate_instruction()
-    spawn_plan = make_spawn_plan(instruction)
     start_time = pygame.time.get_ticks() / 1000.0
-    correct_hits = {c: 0 for c in instruction.targets.keys()}
-    return GameState(
+
+    game = GameState(
         instruction=instruction,
-        correct_hits=correct_hits,
         start_time=start_time,
-        next_spawn_at=start_time,
-        spawn_plan=spawn_plan,
     )
+
+    # Fingerprinting: mark session start and instruction time
+    game.log_event("session_start", time=start_time)
+    game.log_event("instruction_shown", time=start_time, text=instruction.text)
+
+    CENTER_X = WIDTH // 2
+    CENTER_Y = (HEIGHT + HUD_HEIGHT) // 2
+
+    # Spawn 5 bubbles immediately OUTSIDE the frame but aimed inward, with unique radii and colors
+    for i in range(5):
+        # Ensure radii are not too close to each other
+        while True:
+            radius = random.randint(20, 70)
+            too_close = False
+            for b in game.bubbles:
+                if abs(radius - b.radius) < MIN_DIFF:
+                    too_close = True
+                    break
+            if not too_close:
+                break
+
+        color_name = COLOR_NAMES[i % len(COLOR_NAMES)]
+        color = COLOR_MAP[color_name]
+
+        side = random.choice(["left", "right", "top", "bottom"])
+
+        if side == "left":
+            x = -radius - 30
+            y = random.randint(HUD_HEIGHT + 10, HEIGHT - 10)
+
+        elif side == "right":
+            x = WIDTH + radius + 30
+            y = random.randint(HUD_HEIGHT + 10, HEIGHT - 10)
+
+        elif side == "top":
+            x = random.randint(20, WIDTH - 20)
+            y = random.randint(-radius - 40, HUD_HEIGHT - radius - 5)
+
+        else:  # bottom
+            x = random.randint(20, WIDTH - 20)
+            y = random.randint(HEIGHT + radius + 10, HEIGHT + radius + 40)
+
+
+        # Velocity aimed directly toward the center so they enter quickly
+        dx = CENTER_X - x
+        dy = CENTER_Y - y
+        dist = math.hypot(dx, dy) or 1.0
+        dx /= dist
+        dy /= dist
+
+        speed = random.uniform(80, 140)  # fast entry speed
+        vx = dx * speed
+        vy = dy * speed
+
+        bubble = Bubble(i + 1, x, y, radius, color_name, color, vx, vy)
+        game.bubbles.append(bubble)
+
+    return game
 
 
 def handle_click(game: GameState, mx: int, my: int, now: float):
@@ -323,59 +250,57 @@ def handle_click(game: GameState, mx: int, my: int, now: float):
 
     clicked_bubble = None
     for b in game.bubbles:
-        if b.is_clicked(mx, my):
+        if b.is_clicked(mx, my) and b.alive:
             clicked_bubble = b
             break
 
-    if clicked_bubble is None:
-        game.log_event("empty_click", time=now, mx=mx, my=my)
+    if not clicked_bubble:
+        # empty click logged
+        game.log_event("empty_click", mx=mx, my=my)
         return
 
-    color = clicked_bubble.color_name
+    size = clicked_bubble.radius
+    prev = game.clicked_sizes[-1] if game.clicked_sizes else None
 
+    # Determine correctness according to ordering rule
+    is_correct_click = True
+    if prev is not None:
+        if game.instruction.direction == "ascending":
+            if size <= prev:
+                is_correct_click = False
+        else:  # descending
+            if size >= prev:
+                is_correct_click = False
+
+    # Log click with extra info for fingerprinting
     game.log_event(
         "bubble_click",
-        time=now,
         mx=mx,
         my=my,
         bubble_id=clicked_bubble.id,
-        bubble_color=color,
-        targets=game.instruction.targets,
+        bubble_color=clicked_bubble.color_name,
+        bubble_size=size,
+        clicked_so_far=list(game.clicked_sizes),
+        bubble_center=(clicked_bubble.x, clicked_bubble.y),
+        is_correct=is_correct_click,
     )
 
-    if color not in game.instruction.targets:
+    if not is_correct_click:
         game.state = "FAILED"
         game.end_time = now
         clicked_bubble.alive = False
         return
 
-    if game.correct_hits[color] >= game.instruction.targets[color]:
-        game.state = "FAILED"
-        game.end_time = now
-        clicked_bubble.alive = False
-        return
-
-    game.correct_hits[color] += 1
+    # correct click
     clicked_bubble.alive = False
+    game.clicked_sizes.append(size)
 
-    if all(game.correct_hits[c] == req for c, req in game.instruction.targets.items()):
+    if len(game.clicked_sizes) >= game.instruction.count:
         game.state = "PASSED"
         game.end_time = now
 
 
-def draw_text_center(surface, text, font, color, x, y):
-    img = font.render(text, True, color)
-    rect = img.get_rect(center=(x, y))
-    surface.blit(img, rect)
-
-
-def draw_text_left(surface, text, font, color, x, y):
-    img = font.render(text, True, color)
-    rect = img.get_rect(topleft=(x, y))
-    surface.blit(img, rect)
-
-
-def draw_background(surface: pygame.Surface):
+def draw_background(surface):
     for i in range(HEIGHT):
         t = i / HEIGHT
         r = int(BG_TOP[0] * (1 - t) + BG_BOTTOM[0] * t)
@@ -384,57 +309,26 @@ def draw_background(surface: pygame.Surface):
         pygame.draw.line(surface, (r, g, b), (0, i), (WIDTH, i))
 
 
-def draw_hud(surface: pygame.Surface, game: GameState, now: float):
+def draw_hud(surface, game, now):
     hud_rect = pygame.Rect(10, 6, WIDTH - 20, HUD_HEIGHT)
     pygame.draw.rect(surface, HUD_BG, hud_rect, border_radius=10)
     pygame.draw.rect(surface, HUD_BORDER, hud_rect, width=1, border_radius=10)
 
-    draw_text_left(
-        surface,
-        "Bubble Human Check",
-        FONT_TITLE,
-        TEXT_PRIMARY,
-        hud_rect.x + 10,
-        hud_rect.y + 4,
-    )
+    txt = "Bubble Human Check"
+    img = FONT_TITLE.render(txt, True, TEXT_PRIMARY)
+    surface.blit(img, (hud_rect.x + 10, hud_rect.y + 4))
 
-    draw_text_left(
-        surface,
-        game.instruction.text,
-        FONT_SMALL,
-        TEXT_PRIMARY,
-        hud_rect.x + 10,
-        hud_rect.y + 26,
-    )
-
-    chip_x = hud_rect.right - 8
-    chip_y = hud_rect.y + 10
-    for color_name, required in game.instruction.targets.items():
-        label = f"{required}x {color_name}"
-        color = COLOR_MAP[color_name]
-        chip_x -= 80
-        pygame.draw.circle(surface, color, (chip_x + 10, chip_y + 10), 8)
-        pygame.draw.circle(surface, (0, 0, 0, 40), (chip_x + 10, chip_y + 10), 8, 1)
-        draw_text_left(
-            surface,
-            label,
-            FONT_SMALL,
-            TEXT_SECONDARY,
-            chip_x + 24,
-            chip_y + 2,
-        )
+    img2 = FONT_SMALL.render(game.instruction.text, True, TEXT_PRIMARY)
+    surface.blit(img2, (hud_rect.x + 10, hud_rect.y + 26))
 
     time_left = max(0.0, MAX_DURATION - (now - game.start_time))
     bar_rect = pygame.Rect(10, HEIGHT - 18, WIDTH - 20, 8)
     pygame.draw.rect(surface, TIME_BAR_BG, bar_rect, border_radius=4)
-    ratio = max(0.0, min(1.0, time_left / MAX_DURATION))
-    if ratio > 0:
-        fill_width = int(bar_rect.width * ratio)
-        fill_rect = pygame.Rect(bar_rect.x, bar_rect.y, fill_width, bar_rect.height)
-        pygame.draw.rect(surface, TIME_BAR_FILL, fill_rect, border_radius=4)
+    fill_width = int(bar_rect.width * (time_left / MAX_DURATION))
+    pygame.draw.rect(surface, TIME_BAR_FILL, (bar_rect.x, bar_rect.y, fill_width, 8), border_radius=4)
 
 
-def draw_result_banner(surface: pygame.Surface, state: str):
+def draw_result_banner(surface, state):
     if state == "PASSED":
         text = "CAPTCHA PASSED - close window."
         color = SUCCESS_COLOR
@@ -443,9 +337,24 @@ def draw_result_banner(surface: pygame.Surface, state: str):
         color = FAIL_COLOR
 
     banner_rect = pygame.Rect(0, HEIGHT - 42, WIDTH, 24)
-    pygame.draw.rect(surface, (255, 255, 255, 230), banner_rect)
-    pygame.draw.line(surface, (220, 220, 230), (0, banner_rect.top), (WIDTH, banner_rect.top))
-    draw_text_center(surface, text, FONT, color, WIDTH // 2, banner_rect.centery)
+    pygame.draw.rect(surface, WHITE, banner_rect)
+    pygame.draw.line(surface, (200, 200, 200), (0, banner_rect.top), (WIDTH, banner_rect.top))
+    img = FONT.render(text, True, color)
+    surface.blit(img, (WIDTH // 2 - img.get_width() // 2, banner_rect.centery - img.get_height() // 2))
+
+
+def save_fingerprint_json(game: GameState, features: Optional[dict], classification: Optional[dict], filename="fingerprint.json"):
+    out = {
+        "events": game.events,
+        "features": features,
+        "classification": classification,
+    }
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(out, f, indent=2, ensure_ascii=False)
+        print(f"[FINGERPRINT] saved to {filename}")
+    except Exception as e:
+        print("[FINGERPRINT] failed to save fingerprint.json:", e)
 
 
 def main():
@@ -454,15 +363,12 @@ def main():
     clock = pygame.time.Clock()
 
     game = init_game()
+    attempts = 0
+
+    play_rect = pygame.Rect(10, HUD_HEIGHT + 12, WIDTH - 20, HEIGHT - (HUD_HEIGHT + 12) - 40)
+
     running = True
     last_time = pygame.time.get_ticks() / 1000.0
-
-    play_rect = pygame.Rect(
-        10,
-        HUD_HEIGHT + 12,
-        WIDTH - 20,
-        HEIGHT - (HUD_HEIGHT + 12) - 40,
-    )
 
     while running:
         now = pygame.time.get_ticks() / 1000.0
@@ -471,22 +377,40 @@ def main():
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
-                game.state = "FAILED"
-                game.end_time = now
+                # mark session end, save fingerprint, then quit
+                game.log_event("session_end", time=now)
+                try:
+                    features = fingerprinting_v3.compute_features_from_events(game.events)
+                    classification = fingerprinting_v3.classify_fingerprint(features, captcha_passed=(game.state == "PASSED"))
+                except Exception as e:
+                    print("[FINGERPRINT] compute/classify failed on quit:", e)
+                    features = None
+                    classification = None
+                save_fingerprint_json(game, features, classification)
+                pygame.quit()
+                sys.exit()
+
+            elif event.type == pygame.MOUSEMOTION and game.state == "RUNNING":
+                mx, my = event.pos
+                # log movement events (timestamped automatically inside log_event)
+                game.log_event("move", mx=mx, my=my)
+
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mx, my = event.pos
                 handle_click(game, mx, my, now)
 
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r and game.state != "RUNNING":
+                    # manual retry
+                    game = init_game()
+                    last_time = pygame.time.get_ticks() / 1000.0
+                    continue
+
         if game.state == "RUNNING":
-            elapsed = now - game.start_time
-            if elapsed > MAX_DURATION and not all(
-                game.correct_hits[c] == req for c, req in game.instruction.targets.items()
-            ):
+            if (now - game.start_time) > MAX_DURATION and len(game.clicked_sizes) < game.instruction.count:
                 game.state = "FAILED"
                 game.end_time = now
 
-            maybe_spawn_bubbles(game, now)
             for b in game.bubbles:
                 b.move(dt)
 
@@ -499,11 +423,64 @@ def main():
         for b in game.bubbles:
             b.draw(screen)
 
+        # terminal-state handling: set up banner display and logging once
+        if game.state in ("PASSED", "FAILED") and not game.result_logged:
+            game.end_time = now
+            game.result_display_until = now + RESULT_DISPLAY_TIME
+            game.result_logged = True
+
+            # log captcha_result and session_end for fingerprinting
+            game.log_event("captcha_result", result=game.state, attempts=attempts, clicked_sizes=list(game.clicked_sizes))
+            game.log_event("session_end", time=now)
+
         if game.state in ("PASSED", "FAILED"):
             draw_result_banner(screen, game.state)
 
         pygame.display.flip()
         clock.tick(FPS)
+
+        # After showing the banner for a short time, compute fingerprint features/classify and either retry or exit
+        if game.state in ("PASSED", "FAILED") and now >= game.result_display_until:
+            # compute features + classification (wrapped)
+            features = None
+            classification = None
+            try:
+                features = fingerprinting_v3.compute_features_from_events(game.events)
+                classification = fingerprinting_v3.classify_fingerprint(
+                    features,
+                    captcha_passed=(game.state == "PASSED"),
+                )
+            except Exception as e:
+                print("[FINGERPRINT] compute/classify failed:", e)
+
+            # print features & classification
+            print("\n=== FINGERPRINT FEATURES ===")
+            if features:
+                for k, v in features.items():
+                    print(f"{k:30s}: {v}")
+            else:
+                print("(no features)")
+
+            print("=== CLASSIFICATION ===")
+            if classification is not None:
+                print(classification)
+            else:
+                print("(no classification)")
+
+            # save fingerprint.json (events + features + classification if present)
+            save_fingerprint_json(game, features, classification)
+
+            if game.state == "PASSED":
+                pygame.quit()
+                sys.exit(0)
+            else:
+                attempts += 1
+                if attempts <= 2:
+                    game = init_game()
+                    last_time = pygame.time.get_ticks() / 1000.0
+                    continue
+                pygame.quit()
+                sys.exit(1)
 
     pygame.quit()
     sys.exit()
@@ -511,4 +488,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -288,11 +288,6 @@ def classify_fingerprint(features: Dict[str, float], captcha_passed: bool) -> Di
     time_used = features.get("time_used_ratio", 0.0)
     superhuman_flag = features.get("superhuman_flag", 0.0)
 
-    # movement richness
-    move_count = features.get("move_count", 0.0)
-    click_count = features.get("click_count", 0.0)
-
-
     # --- 1) Hard fails (red flags) ---
 
     # 1.1. Teleporting a lot at high speed  --> movement
@@ -321,23 +316,6 @@ def classify_fingerprint(features: Dict[str, float], captcha_passed: bool) -> Di
         risk += 0.4
         risk_timing += 0.4
 
-    # 1.4. Very sparse movement pattern (almost no moves per click) ---> movement
-    if click_count >= 2:
-        moves_per_click = move_count / max(click_count, 1.0)
-
-        # Bots using OS-level moves often produce ~1 move per click; humans usually generate more motion events
-        if moves_per_click < 2.0:
-            risk += 0.2
-            risk_movement += 0.2
-            reasons.append("very_few_moves_per_click")
-
-        # Stronger rule: almost no mouse path at all but still passed
-        if move_count <= 3 and captcha_passed:
-            suspicious = True
-            risk += 0.3
-            risk_movement += 0.3
-            reasons.append("almost_no_mouse_path_but_passed")
-
     # --- 2) Precision & regularity (aimbot-style) ---
 
     # Very precise clicking --> movement
@@ -348,17 +326,8 @@ def classify_fingerprint(features: Dict[str, float], captcha_passed: bool) -> Di
 
     # Very regular timing --> timing
     if ici_cv < 0.12 and ici_mean < 0.45:
-        # base penalty for metronome-like timing
-        base_add = 0.15
-
-        # if we also have very few moves, this is much more suspicious
-        if move_count <= 3 and click_count >= 2:
-            base_add = 0.3
-            suspicious = True
-            reasons.append("regular_timing_with_sparse_movement")
-
-        risk += base_add
-        risk_timing += base_add
+        risk += 0.15
+        risk_timing += 0.15
         reasons.append("timing_too_regular")
 
     # Speed pattern very stable --> movement
@@ -421,15 +390,6 @@ def classify_fingerprint(features: Dict[str, float], captcha_passed: bool) -> Di
         risk_attention += 0.1
         reasons.append("no_pre_click_exploration")
 
-    # No visible exploration path, but *slow* first click and pass
-    # (suggests the agent was "thinking" in the background, not moving the mouse)
-    if pre_path < 10.0 and rt_first > 2.0 and captcha_passed:
-        risk += 0.2
-        risk_attention += 0.2
-        suspicious = True
-        reasons.append("no_pre_click_path_but_slow_decision")
-
-
     # --- 5) Time usage patterns ---> timing ---
 
     if time_used < 0.15 and captcha_passed:
@@ -443,7 +403,7 @@ def classify_fingerprint(features: Dict[str, float], captcha_passed: bool) -> Di
 
     # Final human vs bot decision:
     # - non-human if hard suspicious OR risk very high
-    if suspicious or risk >= 0.5:
+    if suspicious or risk >= 0.6:
         is_human = False
         suspicious = True
     else:

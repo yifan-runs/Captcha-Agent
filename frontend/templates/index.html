@@ -12,9 +12,37 @@
         <label>Password:</label><br>
         <input type="password" id="password"><br><br>
         <button onclick="openCaptcha()">Login</button>
+        <!-- Message area for CAPTCHA result -->
+        <div id="captcha-message" style="margin-top: 12px; font-size: 14px;"></div>
     </div>
 
     <script>
+        let captchaMessageTimeout = null;
+
+        function showCaptchaMessage(text, isError = true) {
+            const msg = document.getElementById("captcha-message");
+            msg.textContent = text;
+            msg.style.color = isError ? "#d32f2f" : "#2e7d32";
+
+            if (captchaMessageTimeout) {
+                clearTimeout(captchaMessageTimeout);
+            }
+            captchaMessageTimeout = setTimeout(() => {
+                msg.textContent = "";
+            }, 4000);
+        }
+
+        // Called by the CAPTCHA popup when it finishes
+        window.onCaptchaResult = function (result) {
+            if (result && result.passed) {
+                // Success: go to admin dashboard
+                window.location.href = "/admin";
+            } else {
+                // Failure: stay on login page and show message
+                showCaptchaMessage("CAPTCHA failed. Please try again.", true);
+            }
+        };
+
         function openCaptcha() {
             const width = 650;
             const height = 450;

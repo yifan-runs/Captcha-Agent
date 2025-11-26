@@ -325,9 +325,6 @@ function sendFingerprintToServer(events, features, classification, meta) {
       events,
       features,
       classification,
-      events,
-      features,
-      classification,
       ...meta,
     }),
   }).catch((err) => {
@@ -393,9 +390,26 @@ function loop() {
         attempt_index: attemptIndex,
       });
 
+      // Helper: notify parent window & close popup
+      function finishAndClose(passed) {
+        try {
+          if (
+            window.opener &&
+            !window.opener.closed &&
+            typeof window.opener.onCaptchaResult === "function"
+          ) {
+            window.opener.onCaptchaResult({ passed });
+          }
+        } catch (e) {
+          console.error("Error notifying opener:", e);
+        }
+        window.close();
+      }
+
       // ───────── CASE 1: correct bubbles + human-like behaviour ─────────
       if (game.state === "PASSED" && isHuman) {
-        alert("CAPTCHA Passed! Human verified, you may proceed.");
+        //alert("CAPTCHA Passed! Human verified, you may proceed.");
+        finishAndClose(true);
         return;
       }
 
@@ -408,7 +422,8 @@ function loop() {
           lastTime = performance.now() / 1000;
         } else {
           // final fail after max attempts
-          alert("CAPTCHA Failed. Try again later.");
+          //alert("CAPTCHA Failed. Try again later.");
+          finishAndClose(false);
           return;
         }
         // no return here -> let the loop continue and draw the new game
@@ -417,7 +432,8 @@ function loop() {
       // ───────── CASE 3: PASSED but classified as bot ─────────
       // (correct bubbles + non-human behaviour)
       if (game.state === "PASSED" && !isHuman) {
-        alert("CAPTCHA Failed. Try again later.");
+        //alert("CAPTCHA Failed. Try again later.");
+        finishAndClose(false);
         return;
       }
     }

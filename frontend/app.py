@@ -18,6 +18,7 @@ def captcha():
     return render_template("captcha.html")
 
 
+
 @app.route("/log_fingerprint", methods=["POST"])
 def log_fingerprint():
     data = request.get_json(force=True) or {}
@@ -75,6 +76,12 @@ def log_fingerprint():
         json.dump(logs, f, indent=2)
 
     return jsonify({"status": "ok"})
+
+
+@app.route("/admin")
+def admin():
+    # Placeholder admin dashboard for now
+    return "<h1>Admin dashboard (placeholder)</h1>"
 
 
 if __name__ == "__main__":

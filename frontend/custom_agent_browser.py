@@ -213,7 +213,7 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
             continue
 
         x, y, w, h = coords["x"], coords["y"], coords["width"], coords["height"]
-        title_offset = 0 if platform.system() == "Darwin" else 30
+        title_offset = 0 if platform.system() == "Darwin" else 35
         hud_region = (x + 60, y + title_offset + 110, w - 120, 100)
 
         try:

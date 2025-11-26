@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import subprocess
 import random
+import sys
 import string
 import time
 from selenium import webdriver
@@ -52,8 +53,11 @@ def click_login(driver):
 # Step 4: Start captcha-solving agent
 # ------------------------------
 def start_agent():
+    python_exe = sys.executable  # path to current python.exe
+    agent_script = r"C:\Users\shrey\Desktop\Ireland\Trinity\academics\scalable computing\mainproject2\scalable_project2\frontend\custom_agent_browser.py"
+
     print("[+] Starting custom agent...")
-    p = subprocess.Popen(["/usr/bin/python3", "/Users/amarvijs/Projects/TCD/sc/mainProject2/frontend/custom_agent_browser.py"])
+    p = subprocess.Popen([python_exe, agent_script])
     print("[+] Agent started with PID:", p.pid)
     return p
 

@@ -416,6 +416,41 @@ def bubble_tracking_thread():
     log_event("track_stop")
     print("[TRACK] tracker exiting.")
 
+
+import random
+
+def human_move(x, y, duration=0.25):
+    """
+    Move mouse to (x,y) using a human-like curved path with jitter.
+    duration = approx total travel time.
+    """
+
+    start_x, start_y = pyautogui.position()
+
+    # Number of interpolation points (movement segments)
+    steps = int(duration * 120)  # ~120 Hz movement
+
+    # Random control points for a quadratic bezier (curve)
+    cp1_x = start_x + (x - start_x) * random.uniform(0.2, 0.8) + random.randint(-30, 30)
+    cp1_y = start_y + (y - start_y) * random.uniform(0.2, 0.8) + random.randint(-30, 30)
+
+    for i in range(steps + 1):
+        t = i / steps
+
+        # easing (ease-in-out)
+        t2 = t * t * (3 - 2 * t)
+
+        # Quadratic bezier interpolation
+        bx = (1 - t2)**2 * start_x + 2 * (1 - t2) * t2 * cp1_x + t2**2 * x
+        by = (1 - t2)**2 * start_y + 2 * (1 - t2) * t2 * cp1_y + t2**2 * y
+
+        # Add very slight jitter
+        bx += random.uniform(-1.2, 1.2)
+        by += random.uniform(-1.2, 1.2)
+
+        pyautogui.moveTo(bx, by, duration=0)   # instantaneous update, curve controls speed
+        time.sleep(duration / steps)
+
 # -------------------------
 # Clicker
 # -------------------------
@@ -478,8 +513,9 @@ def choose_targets_and_click():
         try:
             print(f"[CLICKER] clicking at {(matched['x'], matched['y'])}")
             log_event("click_attempt", target_id=matched["id"], x=matched["x"], y=matched["y"])
-            pyautogui.moveTo(matched["x"], matched["y"], duration=0.08)
+            human_move(matched["x"], matched["y"], duration=random.uniform(0.25, 0.45))
             pyautogui.click()
+
             time.sleep(CLICK_DELAY)
             log_event("click_done", target_id=matched["id"], x=matched["x"], y=matched["y"])
         except Exception as e:

@@ -2,9 +2,16 @@
 """
 custom_agent_browser.py
 
-Agent that logs into the Login page in Chrome, then waits for a popup
-"Bubble CAPTCHA" window, OCRs the HUD (canvas top), tracks bubbles
-in the canvas area, and clicks the correct bubbles.
+Agent that finds a browser window by title (substring), OCRs the HUD (canvas top),
+tracks bubbles in the canvas area, and clicks the correct bubbles.
+
+Usage:
+ - Ensure the CAPTCHA page is open in a browser window whose title includes WINDOW_TITLE_SUBSTR.
+ - Run this agent; it will detect the window, OCR the HUD and act.
+
+Notes / tuning:
+ - If the HUD or canvas are offset because of toolbars, change TITLE_BAR_ESTIMATE or HUD_LEFT/RIGHT margins.
+ - For macOS the code uses Quartz to enumerate windows; on Windows/Linux it uses pygetwindow.
 """
 
 import platform
@@ -33,24 +40,21 @@ if platform.system() == "Darwin":
         from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionOnScreenOnly, kCGNullWindowID
     except Exception:
         CGWindowListCopyWindowInfo = None
-else:
-    CGWindowListCopyWindowInfo = None
 
 # -------------------------
 # Config
 # -------------------------
-# Used only for the CAPTCHA popup window
-WINDOW_TITLE_SUBSTR = "Bubble CAPTCHA"
-HUD_HEIGHT = 56
+WINDOW_TITLE_SUBSTR = "Bubble CAPTCHA"  # substring to search for in window titles (change to your page <title>)
+HUD_HEIGHT = 56              # pixels in your canvas HUD (JS uses 56)
 HUD_LEFT_MARGIN = 10
 HUD_RIGHT_MARGIN = 10
-PLAY_TOP_MARGIN = 12
-PLAY_BOTTOM_MARGIN = 40
+PLAY_TOP_MARGIN = 12         # distance from HUD bottom to play area (approx)
+PLAY_BOTTOM_MARGIN = 40      # footer area size in your game
 TRACK_FPS = 15
 CLICK_DELAY = 0.12
 MAX_OCR_ATTEMPTS = 20
 
-# Hough parameters
+# Hough parameters (tweak if detection misses)
 HOUGH_DP = 1.2
 HOUGH_MIN_DIST = 30
 HOUGH_PARAM1 = 50
@@ -64,22 +68,13 @@ COLOR_MAP = {
     "GREEN":  (80, 200, 120),
     "YELLOW": (240, 220, 80),
     "ORANGE": (245, 170, 80),
+    # extend if needed...
 }
 
-# DOMRect for fields (from DevTools)
-USERNAME_RECT = {
-    "left": 406.8000183105469,
-    "top": 286.25,
-    "width": 385.6000061035156,
-    "height": 42.400001525878906
-}
-PASSWORD_RECT = None
-LOGIN_BUTTON_RECT = None
-
-# Shared state
+# Shared runtime state
 shared_state = {
-    "instruction": None,
-    "bubbles": [],
+    "instruction": None,    # { "text", "no_of_bubbles", "bubble_order" }
+    "bubbles": [],          # tracked bubbles (absolute screen coords)
     "events": [],
     "running": True,
     "window_coords": None,
@@ -93,12 +88,13 @@ def log_event(event_type, **kwargs):
     shared_state["events"].append({"time": t, "type": event_type, **kwargs})
 
 def ensure_tesseract():
+    """Try to ensure pytesseract.tesseract_cmd is set; if not, attempt to find tesseract."""
     if getattr(pytesseract.pytesseract, "tesseract_cmd", None):
         return
-    exe = shutil.which("tesseract")
-    if exe:
-        pytesseract.pytesseract.tesseract_cmd = exe
+    if shutil.which("tesseract"):
+        pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
         return
+    # Windows common path fallback
     if platform.system() == "Windows":
         candidate = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
         if shutil.os.path.exists(candidate):
@@ -106,154 +102,51 @@ def ensure_tesseract():
             return
     raise FileNotFoundError("Tesseract executable not found. Install or set pytesseract.pytesseract.tesseract_cmd")
 
-# -------------------------
-# Window helpers
-# -------------------------
-def find_chrome_window(min_width=300, min_height=200):
-    """
-    Find the main Chrome window (used for Login page).
-    """
-    system = platform.system()
-    if system in ("Windows", "Linux") and gw is not None:
-        try:
-            for w in gw.getAllWindows():
-                title = (w.title or "")
-                # Look for Chrome with "Login" in title, or just Chrome if needed
-                if ("chrome" in title.lower() or "login" in title.lower()) and w.width >= min_width and w.height >= min_height:
-                    return {"x": w.left, "y": w.top, "width": w.width, "height": w.height, "title": title}
-        except Exception:
-            return None
-    elif system == "Darwin" and CGWindowListCopyWindowInfo is not None:
-        window_list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)
-        for w in window_list:
-            name = (w.get("kCGWindowName", "") or "")
-            owner = (w.get("kCGWindowOwnerName", "") or "")
-            bounds = w.get("kCGWindowBounds", {}) or {}
-            width = int(bounds.get("Width", 0))
-            height = int(bounds.get("Height", 0))
-            if ("chrome" in owner.lower() or "login" in name.lower()) and width >= min_width and height >= min_height:
-                return {
-                    "x": int(bounds.get("X", 0)),
-                    "y": int(bounds.get("Y", 0)),
-                    "width": width,
-                    "height": height,
-                    "title": name or owner,
-                }
-    return None
 
+
+# -------------------------
+# Window discovery by title substring
+# -------------------------
 def find_window_by_title_substr(substr=WINDOW_TITLE_SUBSTR, min_width=300, min_height=200):
     system = platform.system()
     if system in ("Windows", "Linux") and gw is not None:
         try:
-            for w in gw.getAllWindows():
+            wins = gw.getWindowsWithTitle("")  # get all, then filter
+            for w in wins:
                 title = (w.title or "")
                 if substr.lower() in title.lower() and w.width >= min_width and w.height >= min_height:
                     return {"x": w.left, "y": w.top, "width": w.width, "height": w.height, "title": title}
-        except Exception:
-            return None
+        except Exception as e:
+            # fallback: gw may behave differently; try getAllWindows
+            try:
+                wins = gw.getAllWindows()
+                for w in wins:
+                    title = (w.title or "")
+                    if substr.lower() in title.lower() and w.width >= min_width and w.height >= min_height:
+                        return {"x": w.left, "y": w.top, "width": w.width, "height": w.height, "title": title}
+            except Exception:
+                pass
+        return None
     elif system == "Darwin" and CGWindowListCopyWindowInfo is not None:
+        # macOS: iterate windows and match kCGWindowName
         window_list = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID)
         for w in window_list:
-            name = (w.get("kCGWindowName", "") or "")
-            owner = (w.get("kCGWindowOwnerName", "") or "")
+            name = w.get("kCGWindowName", "") or ""
+            owner = w.get("kCGWindowOwnerName", "") or ""
             bounds = w.get("kCGWindowBounds", {}) or {}
             width = int(bounds.get("Width", 0))
             height = int(bounds.get("Height", 0))
             if substr.lower() in name.lower() or substr.lower() in owner.lower():
                 if width >= min_width and height >= min_height:
-                    return {
-                        "x": int(bounds.get("X", 0)),
-                        "y": int(bounds.get("Y", 0)),
-                        "width": width,
-                        "height": height,
-                        "title": name or owner,
-                    }
-    return None
-
-# -------------------------
-# Login helpers
-# -------------------------
-def _rect_center_on_screen(window_coords, rect):
-    """
-    Convert DOMRect (CSS coords) into absolute screen coords using devicePixelRatio.
-    For Chrome, rect is relative to the content area; do not add window_coords offset.
-    """
-    dpr = 1.25  # adjust if your monitor scaling is different
-
-    # Convert DOMRect to screen coordinates (add window origin and estimated browser UI offset)
-    WINDOW_TOPBAR_OFFSET = 220  # adjust as needed for your Chrome layout
-
-    css_x = rect["left"] + rect["width"] / 2
-    css_y = rect["top"] + rect["height"] / 2
-
-    screen_x = int(window_coords["x"] + css_x * dpr)
-    screen_y = int(window_coords["y"] + WINDOW_TOPBAR_OFFSET + css_y * dpr)
-    return screen_x, screen_y
-
-
-def perform_login(window_coords):
-    """
-    Click username, password, and login button inside the Chrome window.
-    Uses DOMRect centers if provided; otherwise falls back to simple offsets.
-    """
-    print("[LOGIN] Performing auto-login...")
-
-    try:
-        # Make sure Chrome window is frontmost by clicking its center
-        cx = window_coords["x"] + window_coords["width"] // 2
-        cy = window_coords["y"] + 50
-        pyautogui.click(cx, cy)
-        time.sleep(0.2)
-
-        # Username
-        if USERNAME_RECT:
-            ux, uy = _rect_center_on_screen(window_coords, USERNAME_RECT)
-        else:
-            ux = window_coords["x"] + 120
-            uy = window_coords["y"] + 180
-
-        pyautogui.moveTo(ux, uy, duration=0.15)
-        pyautogui.click()
-        time.sleep(0.08)
-        pyautogui.typewrite("Group twelve", interval=0.05)
-        time.sleep(0.12)
-
-        # Password
-        if PASSWORD_RECT:
-            px, py_ = _rect_center_on_screen(window_coords, PASSWORD_RECT)
-        else:
-            px = window_coords["x"] + 120
-            py_ = window_coords["y"] + 250
-
-        pyautogui.moveTo(px, py_, duration=0.15)
-        pyautogui.click()
-        time.sleep(0.08)
-        pyautogui.typewrite("Password123", interval=0.05)
-        time.sleep(0.12)
-
-        # Login button
-        if LOGIN_BUTTON_RECT:
-            bx, by = _rect_center_on_screen(window_coords, LOGIN_BUTTON_RECT)
-        else:
-            bx = window_coords["x"] + 120
-            by = window_coords["y"] + 330
-
-        print("[LOGIN] Clicking login button...")
-        pyautogui.moveTo(bx, by, duration=0.15)
-        pyautogui.click()
-        time.sleep(0.5)
-    except Exception as e:
-        print("[LOGIN] Failed:", e)
-        return False
-
-    print("[LOGIN] Submitted login form.")
-    return True
+                    return {"x": int(bounds.get("X", 0)), "y": int(bounds.get("Y", 0)), "width": width, "height": height, "title": name or owner}
+        return None
+    else:
+        return None
 
 # -------------------------
 # OCR thread
 # -------------------------
 import re
-
 def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
     ensure_tesseract()
     attempts = 0
@@ -267,6 +160,7 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
             continue
 
         x, y, w, h = coords["x"], coords["y"], coords["width"], coords["height"]
+        # Estimate titlebar height (varies by OS/browser). Allow user adjustment if needed.
         title_bar_height = 30 if platform.system() == "Windows" else 0
         hud_region = (
             int(x + 60),
@@ -274,6 +168,7 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
             int(w - 120),
             int(100)
         )
+
 
         try:
             img = pyautogui.screenshot(region=hud_region)
@@ -284,30 +179,36 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
 
         frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # adaptive threshold or mild thresholding helps OCR on light backgrounds
         _, th = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
         text = pytesseract.image_to_string(th).strip()
         print("[OCR] reads:\n", text)
         log_event("ocr_text", raw=text)
-
+        
+        # --- SUCCESS DETECTION ---
         success_patterns = [
             r"captcha\s+passed",
-            r"captcha\s+assed",
-            r"you\s+may\s+proceed",
+            r"captcha\s+assed",          # handles the typo you observed
+            r"you\s+may\s+proceed"
         ]
+
         lower_text = text.lower()
         if any(re.search(pat, lower_text) for pat in success_patterns):
             print("[OCR] CAPTCHA success detected — exiting agent.")
             log_event("captcha_success", raw=text)
             shared_state["running"] = False
             return None
+        # --- END SUCCESS DETECTION ---
 
+
+        # Try to find number and ordering word
         number_match = re.search(r"\b(2|3)\b", text)
         order_match = re.search(r"\b(ascending|descending)\b", text, re.IGNORECASE)
         if number_match and order_match:
             instr = {
                 "text": text,
                 "no_of_bubbles": int(number_match.group(1)),
-                "bubble_order": order_match.group(1).lower(),
+                "bubble_order": order_match.group(1).lower()
             }
             shared_state["instruction"] = instr
             print("[OCR] Instruction extracted:", instr)
@@ -322,7 +223,7 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
     return None
 
 # -------------------------
-# Bubble tracking thread
+# Bubble tracking (Hough) thread
 # -------------------------
 def color_name_from_bgr(bgr_pixel):
     b, g, r = int(bgr_pixel[0]), int(bgr_pixel[1]), int(bgr_pixel[2])
@@ -332,7 +233,7 @@ def color_name_from_bgr(bgr_pixel):
         dr = r - rgb[0]
         dg = g - rgb[1]
         db = b - rgb[2]
-        d = dr * dr + dg * dg + db * db
+        d = dr*dr + dg*dg + db*db
         if d < best_d:
             best_d = d
             best = name
@@ -341,7 +242,7 @@ def color_name_from_bgr(bgr_pixel):
 def bubble_tracking_thread():
     last_frame_bubbles = []
     next_id = 1
-
+    # Wait for window coords
     while shared_state["running"] and shared_state.get("window_coords") is None:
         w = find_window_by_title_substr()
         if w:
@@ -361,7 +262,7 @@ def bubble_tracking_thread():
         int(x + 10),
         int(y + title_bar_height + HUD_HEIGHT + PLAY_TOP_MARGIN),
         int(w - 20),
-        int(h - HUD_HEIGHT - PLAY_TOP_MARGIN - PLAY_BOTTOM_MARGIN),
+        int(h - HUD_HEIGHT - PLAY_TOP_MARGIN - PLAY_BOTTOM_MARGIN)
     )
     print("[TRACK] play region:", play_region)
     log_event("track_start", play_region=play_region)
@@ -380,28 +281,22 @@ def bubble_tracking_thread():
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.medianBlur(gray, 5)
 
-        circles = cv2.HoughCircles(
-            gray,
-            cv2.HOUGH_GRADIENT,
-            dp=HOUGH_DP,
-            minDist=HOUGH_MIN_DIST,
-            param1=HOUGH_PARAM1,
-            param2=HOUGH_PARAM2,
-            minRadius=HOUGH_MIN_RADIUS,
-            maxRadius=HOUGH_MAX_RADIUS,
-        )
+        circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, dp=HOUGH_DP, minDist=HOUGH_MIN_DIST,
+                                   param1=HOUGH_PARAM1, param2=HOUGH_PARAM2,
+                                   minRadius=HOUGH_MIN_RADIUS, maxRadius=HOUGH_MAX_RADIUS)
         frame_bubbles = []
 
         if circles is not None:
             circles = np.uint16(np.around(circles))
             for c in circles[0, :]:
                 cx, cy, r = int(c[0]), int(c[1]), int(c[2])
-                sx = min(max(cx, 0), frame.shape[1] - 1)
-                sy = min(max(cy, 0), frame.shape[0] - 1)
+                sx = min(max(cx, 0), frame.shape[1]-1)
+                sy = min(max(cy, 0), frame.shape[0]-1)
                 bgr = frame[sy, sx].tolist()
                 color_name = color_name_from_bgr(bgr)
                 frame_bubbles.append({"x": cx, "y": cy, "r": r, "color_name": color_name})
 
+        # nearest neighbor assign ids
         assigned = []
         new_bubbles = []
         for fb in frame_bubbles:
@@ -436,7 +331,7 @@ def bubble_tracking_thread():
                 "x": abs_x,
                 "y": abs_y,
                 "r": b["r"],
-                "color_name": b["color_name"],
+                "color_name": b["color_name"]
             })
 
         shared_state["bubbles"] = abs_bubbles
@@ -467,6 +362,7 @@ def choose_targets_and_click():
     order = instr["bubble_order"]
     print(f"[CLICKER] Instruction: burst {needed} bubbles in {order} order.")
 
+    # Allow tracker to populate
     time.sleep(0.6)
     b_snapshot = list(shared_state.get("bubbles", []))
     if not b_snapshot:
@@ -497,6 +393,7 @@ def choose_targets_and_click():
                 matched = cb
                 break
         if matched is None:
+            # fallback nearest by distance
             best = None
             bestd = float("inf")
             for cb in cur:
@@ -528,55 +425,41 @@ def choose_targets_and_click():
 # -------------------------
 def main():
     print("custom_agent_browser starting.")
+    while True:
+        coords = find_window_by_title_substr()
+        if not coords:
+            print("Window with title substring not found. Exiting.")
+            break
 
-    # STEP 1: find Chrome/Login window and perform login once
-    login_done = False
-    while not login_done:
-        chrome_win = find_chrome_window()
-        if not chrome_win:
-            print("[MAIN] Chrome/Login window not found, retrying...")
-            time.sleep(1)
-            continue
-        print("[MAIN] Found Chrome/login window:", chrome_win.get("title", ""))
-        if perform_login(chrome_win):
-            login_done = True
-            print("[MAIN] Login done, waiting for CAPTCHA popup...")
-        time.sleep(2)
+        shared_state["window_coords"] = coords
+        print("Found window:", coords.get("title", ""), coords)
 
-    # STEP 2: wait for CAPTCHA popup window
-    coords = None
-    while coords is None:
-        coords = find_window_by_title_substr(WINDOW_TITLE_SUBSTR)
-        if coords:
-            print("[MAIN] CAPTCHA window detected:", coords["title"])
-            shared_state["window_coords"] = coords
-        else:
-            print("[MAIN] CAPTCHA window not found, waiting...")
-            time.sleep(0.5)
+        shared_state["instruction"] = None
+        shared_state["bubbles"] = []
+        shared_state["running"] = True
 
-    # STEP 3: run tracker + OCR + clicker on CAPTCHA window
-    shared_state["instruction"] = None
-    shared_state["bubbles"] = []
-    shared_state["running"] = True
+        t_track = threading.Thread(target=bubble_tracking_thread, name="TrackThread", daemon=True)
+        t_ocr = threading.Thread(target=ocr_read_hud_thread, name="OCRThread", daemon=True)
+        t_clicker = threading.Thread(target=choose_targets_and_click, name="ClickerThread", daemon=True)
 
-    t_track = threading.Thread(target=bubble_tracking_thread, name="TrackThread", daemon=True)
-    t_ocr = threading.Thread(target=ocr_read_hud_thread, name="OCRThread", daemon=True)
-    t_clicker = threading.Thread(target=choose_targets_and_click, name="ClickerThread", daemon=True)
+        t_track.start()
+        t_ocr.start()
+        t_clicker.start()
 
-    t_track.start()
-    t_ocr.start()
-    t_clicker.start()
+        # Wait for OCR+clicker to finish (timeouts are conservative)
+        t_ocr.join(timeout=40)
+        t_clicker.join(timeout=30)
 
-    t_ocr.join(timeout=40)
-    t_clicker.join(timeout=30)
+        shared_state["running"] = False
+        t_track.join(timeout=2)
 
-    shared_state["running"] = False
-    t_track.join(timeout=2)
+        time.sleep(1)
+        print("Round finished. Checking for window again...")
 
-    print("Round finished. events:")
+    print("Agent finished. events:")
     for e in shared_state["events"]:
         ts = datetime.fromtimestamp(e["time"]).isoformat()
-        print(ts, e["type"], {k: v for k, v in e.items() if k not in ("time", "type")})
+        print(ts, e["type"], {k: v for k, v in e.items() if k not in ("time","type")})
 
 if __name__ == "__main__":
     main()

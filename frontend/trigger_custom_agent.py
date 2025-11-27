@@ -18,7 +18,7 @@ def random_string(n=8):
 # ------------------------------
 # Step 1: Launch Chrome + Login Page
 # ------------------------------
-def launch_login_page(url=" http://127.0.0.1:5000"):
+def launch_login_page(url=" http://127.0.0.1:8080"):
     chrome_options = Options()
     chrome_options.add_experimental_option("detach", True)   # keep chrome open
 

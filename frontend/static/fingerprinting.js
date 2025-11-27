@@ -277,98 +277,106 @@ function classifyFingerprint(features, captchaPassed) {
   const pre_path = features.pre_first_click_path_length ?? 0.0;
 
   const time_used = features.time_used_ratio ?? 0.0;
-  const superhuman_flag = features.superhuman_flag ?? 0.0;
 
   const move_count = features.move_count ?? 0.0;
   const click_count = features.click_count ?? 0.0;
 
-  // 1) Hard fails
+  const curvature_mean = features.curvature_mean ?? 1.0;
+
+  // =======================================================
+  // 1) Teleport / Impossible Movement
+  // =======================================================
   if (tele > 0.15) {
     suspicious = true;
     reasons.push("teleport_fraction_high");
-    risk += 0.35;
-    risk_movement += 0.35;
+    risk += 0.4;
+    risk_movement += 0.4;
   } else if (tele > 0.08 && avg_speed > 900) {
     suspicious = true;
     reasons.push("teleports_with_high_speed");
-    risk += 0.25;
-    risk_movement += 0.25;
+    risk += 0.3;
+    risk_movement += 0.3;
   }
 
-  if (rt_first < 0.15 && rt_mean < 0.25) {
+  // =======================================================
+  // 2) Reaction Timing Thresholds
+  // =======================================================
+  // Bots show < 0.22s reaction time and < 0.30s mean timing
+  if (rt_first < 0.22 && rt_mean < 0.3) {
     suspicious = true;
-    reasons.push("reaction_too_fast");
+    reasons.push("reaction_times_too_fast");
     risk += 0.3;
     risk_timing += 0.3;
   }
 
-  if (superhuman_flag === 1.0) {
+  // =======================================================
+  // 3) Inter-Click Timing Regularity
+  // =======================================================
+  // Bots: ici_cv < 0.12 AND ici_mean < 0.45
+  let regularity_score = 0.0;
+  if (ici_cv < 0.12 && ici_mean < 0.45) {
+    regularity_score = 0.2;
     suspicious = true;
-    reasons.push("superhuman_pattern");
-    risk += 0.4;
-    risk_timing += 0.4;
+    reasons.push("interclick_interval_too_regular");
+    risk += 0.2;
+    risk_timing += 0.2;
   }
 
-  if (click_count >= 2) {
-    const moves_per_click = move_count / Math.max(click_count, 1.0);
+  // =======================================================
+  // 4) Mouse Speed Profile
+  // =======================================================
+  // Bots: avg_speed > 550 px/s AND speed_std < 250
+  if (avg_speed > 550 && speed_std < 250) {
+    suspicious = true;
+    reasons.push("robotic_speed_pattern");
+    risk += 0.25;
+    risk_movement += 0.25;
+  }
 
-    if (moves_per_click < 2.0) {
+  // =======================================================
+  // 5) Path Density (moves per click)
+  // =======================================================
+  // Bots: few micro-adjustments
+  if (click_count >= 2) {
+    const moves_per_click = move_count / Math.max(1, click_count);
+
+    if (moves_per_click < 2.2) {
+      suspicious = true;
+      reasons.push("too_few_moves_per_click");
       risk += 0.2;
       risk_movement += 0.2;
-      reasons.push("very_few_moves_per_click");
     }
 
     if (move_count <= 3 && captchaPassed) {
       suspicious = true;
+      reasons.push("almost_no_mouse_path_but_passed");
       risk += 0.3;
       risk_movement += 0.3;
-      reasons.push("almost_no_mouse_path_but_passed");
     }
   }
 
-  // 2) Precision & regularity
-  if (off_mean < 3.0 && off_std < 1.5) {
-    risk += 0.15;
-    risk_movement += 0.15;
-    reasons.push("very_precise_clicks");
-  }
-
-  if (ici_cv < 0.12 && ici_mean < 0.45) {
-    let base_add = 0.15;
-
-    if (move_count <= 3 && click_count >= 2) {
-      base_add = 0.3;
-      suspicious = true;
-      reasons.push("regular_timing_with_sparse_movement");
-    }
-
-    risk += base_add;
-    risk_timing += base_add;
-    reasons.push("timing_too_regular");
-  }
-
-  if (speed_std < 300.0 && avg_speed > 600.0) {
-    risk += 0.1;
-    risk_movement += 0.1;
-    reasons.push("speed_pattern_too_stable");
-  }
-
-  if (off_mean < 3.0 && off_std < 1.5 && ici_cv < 0.12 && ici_mean < 0.45) {
+  // =======================================================
+  // 6) Click Precision Thresholds
+  // =======================================================
+  // Bots: < 3.5px mean and < 1.4px std deviation
+  if (off_mean < 3.5 && off_std < 1.4) {
     suspicious = true;
-    reasons.push("precision_plus_regular_timing");
-    risk += 0.2;
-    risk_movement += 0.1;
-    risk_timing += 0.1;
+    reasons.push("click_precision_unhuman");
+    risk += 0.25;
+    risk_movement += 0.25;
   }
 
-  // 3) Brute-force style
-  if (total_clicks >= 15 && empty_ratio > 0.5) {
+  // =======================================================
+  // 7) Empty Click / Brute-Force Patterns
+  // =======================================================
+  if (empty_ratio > 0.45) {
     suspicious = true;
-    reasons.push("empty_click_bruteforce");
+    reasons.push("empty_click_bruteforce_pattern");
     risk += 0.3;
     risk_errors += 0.3;
   }
 
+  // clicks-per-second threshold
   if (cps > 3.0) {
     suspicious = true;
     reasons.push("click_rate_too_high");
@@ -380,45 +388,55 @@ function classifyFingerprint(features, captchaPassed) {
     reasons.push("click_rate_high");
   }
 
-  if (captchaPassed && inc_clicks >= 2) {
+  // incorrect click spam
+  if (inc_clicks >= 4) {
     suspicious = true;
-    reasons.push("many_incorrect_bubble_clicks_but_passed");
+    reasons.push("too_many_incorrect_clicks");
     risk += 0.25;
     risk_errors += 0.25;
-  } else if (inc_clicks >= 4) {
-    risk += 0.15;
-    risk_errors += 0.15;
-    reasons.push("many_incorrect_bubble_clicks");
   }
 
-  // 4) Attention cues
-  if (visited_instr < 0.5 && rt_first < 0.4) {
+  // =======================================================
+  // 8) Human Attention Markers
+  // =======================================================
+  if (visited_instr < 0.5 && rt_first < 0.35) {
+    suspicious = true;
+    reasons.push("did_not_read_instructions");
     risk += 0.15;
     risk_attention += 0.15;
-    reasons.push("no_instruction_visit_fast_rt");
   }
 
-  if (pre_path < 30.0 && rt_first < 0.4) {
-    risk += 0.1;
-    risk_attention += 0.1;
-    reasons.push("no_pre_click_exploration");
-  }
-
-  if (pre_path < 10.0 && rt_first > 2.0 && captchaPassed) {
-    risk += 0.2;
-    risk_attention += 0.2;
+  if (pre_path < 35) {
     suspicious = true;
-    reasons.push("no_pre_click_path_but_slow_decision");
+    reasons.push("no_pre_first_click_exploration");
+    risk += 0.15;
+    risk_attention += 0.15;
   }
 
-  // 5) Time usage
+  // =======================================================
+  // 9) Overall Time Usage
+  // =======================================================
   if (time_used < 0.15 && captchaPassed) {
+    suspicious = true;
+    reasons.push("very_fast_overall");
     risk += 0.15;
     risk_timing += 0.15;
-    reasons.push("very_fast_overall");
   }
 
-  risk = Math.max(0.0, Math.min(1.0, risk));
+  // =======================================================
+  // 10) Crucial Curvature gamechanger
+  // =======================================================
+  if (curvature_mean < 1.03 && move_count > 8) {
+    suspicious = true;
+    reasons.push("straight_line_movement");
+    risk += 0.2;
+    risk_movement += 0.2;
+  }
+
+  // =======================================================
+  // FINAL DECISION
+  // =======================================================
+  risk = Math.max(0, Math.min(1, risk));
 
   let is_human;
   if (suspicious || risk >= 0.5) {

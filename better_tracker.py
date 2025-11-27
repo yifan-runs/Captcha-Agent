@@ -6,8 +6,6 @@ import threading
 import time
 from typing import Tuple, List, Dict, Generator, Optional
 from selenium_portal import SeleniumPortal
-from scipy.optimize import linear_sum_assignment
-
 
 def fit_circle_ls(pts: np.ndarray) -> Tuple[float, float, float]:
     """
@@ -64,7 +62,22 @@ def detect_bubbles(frame: np.ndarray, min_area: float = 150.0, min_points: int =
     return detections
 
 
-def create_kalman(x: float, y: float, r: float) -> cv2.KalmanFilter:
+def _greedy_match(cost: np.ndarray):
+    nT, nD = cost.shape
+    pairs: List[Tuple[int, int]] = []
+    usedT, usedD = set(), set()
+    flat = [(cost[i, j], i, j) for i in range(nT) for j in range(nD)]
+    flat.sort(key=lambda x: x[0])
+    for c, i, j in flat:
+        if i in usedT or j in usedD:
+            continue
+        pairs.append((i, j))
+        usedT.add(i)
+        usedD.add(j)
+    return pairs
+
+
+def create_kalman(x: float, y: float, r: float):
     kf = cv2.KalmanFilter(5, 3)
     dt = 1.0
 
@@ -96,7 +109,7 @@ def match_tracks(
     r_w: float = 5.0,
     col_w: float = 0.5,
     max_cost: float = 1e9,
-) -> Tuple[List[Tuple[int, int]], List[int], List[int]]:
+):
     if not tracks or not detections:
         return [], list(tracks.keys()), list(range(len(detections)))
 
@@ -116,8 +129,7 @@ def match_tracks(
             col_dist = np.linalg.norm(col_t - col_d)
             cost[ti, dj] = pos_w * pos_dist + r_w * r_dist + col_w * col_dist
 
-    row_ind, col_ind = linear_sum_assignment(cost)
-    pairs = list(zip(row_ind, col_ind))
+    pairs = _greedy_match(cost)
     matches: List[Tuple[int, int]] = []
     unmatched_tracks = set(track_ids)
     unmatched_dets = set(range(len(detections)))
@@ -134,10 +146,10 @@ def match_tracks(
 
 def resurrect_from_retired(
     det: Dict,
-    retired_tracks: Dict[int, Dict],
+    retired_tracks: Dict,
     radius_tol: float = 3.0,
     color_tol: float = 60.0,
-) -> Optional[Tuple[int, Dict]]:
+):
     if not retired_tracks:
         return None
 
@@ -332,6 +344,9 @@ def kalman_tracker_worker(
                 if cv2.waitKey(1) & 0xFF == 27:
                     stop_event.set()
                     break
+            else:
+                for r in readings:
+                    print(f'ID {r["id"]} d={r["diameter"]} x={int(r["cx"])} y={int(r["cy"])}')
     finally:
         try:
             gen.close()

@@ -19,7 +19,7 @@ def jitter_tween_factory(jitter_strength: float = 0.05):
 
 jitter_tween = jitter_tween_factory(float(random.randrange(40, 80)) * 0.001)
 
-sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:5000/captcha")
+sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:8080/captcha")
 q: queue.Queue[Tuple] = queue.Queue(maxsize=1)
 stop_ev = threading.Event()
 tracker_thread = threading.Thread(
@@ -36,7 +36,7 @@ tracker_thread = threading.Thread(
 )
 tracker_thread.start()
 
-client = ollama.Client(host="", timeout=60)
+client = ollama.Client(host="http://127.0.0.1:11434", timeout=60)
 # MODEL_NAME = "moondream:1.8b"
 # MODEL_NAME = "qwen3-vl:2b"
 MODEL_NAME = "minicpm-v:8b"
@@ -94,7 +94,6 @@ try:
             )
 
             raw_content = response.message.content
-            print("Message:", response.message)
             print("RAW:", raw_content)
             data = json.loads(raw_content)
             click_ids = data.get("click_ids", [])

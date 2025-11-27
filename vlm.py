@@ -3,7 +3,7 @@ import queue
 import time
 from typing import Tuple, List, Dict
 import ollama
-from tracker import kalman_tracker_worker
+from better_tracker import kalman_tracker_worker
 import cv2
 import random
 import json
@@ -28,7 +28,6 @@ tracker_thread = threading.Thread(
     kwargs={
         "source": sp,
         "roi": (0.0, 0.18, 1.0, 0.95),
-        "max_dist": 150,
         "max_misses": 60,
         "put_timeout": 0.01,
         "show_window": True
@@ -65,13 +64,12 @@ try:
         prompt_text += "The current tracked objects are listed as follows:\n"
         prompt_text += "["
         for r in readings:
-            prompt_text += f"{{'id':{r['id']},'x':{int(r['cx'])},'y':{int(r['cy'])}}},"
+            prompt_text += f"{{'id':{r['id']},'diameter':{int(r['diameter'])}}},"
         prompt_text += "]\n"
         prompt_text += (
+            "There should be written instructions on the top left of the screen, read them first.\n"
             "Select the IDs to click according to the rules defined on the screen.\n"
-            "Some IDs may point to non-existent bubbles, make sure each selected ID hovers over a real bubble.\n"
-            "Approximate the size in pixels of each bubble before making any decisions.\n"
-            "Output exactly in order of the rules you have read from the image i.e. {\"click_ids\":[ID1,ID2,...]} where ID1,ID2,... must be integers.\n"
+            "Output exactly in order of the rules you have read from the image i.e. {\"click_ids\":[ID1,ID2,...]} where ID1,ID2,... must be integers in your decided order.\n"
         )
 
         ok, buffer = cv2.imencode(".jpg", frame)
@@ -93,10 +91,10 @@ try:
                 format="json",
                 keep_alive=-1,
                 stream=False,
-                think=False,
             )
 
             raw_content = response.message.content
+            print("Message:", response.message)
             print("RAW:", raw_content)
             data = json.loads(raw_content)
             click_ids = data.get("click_ids", [])

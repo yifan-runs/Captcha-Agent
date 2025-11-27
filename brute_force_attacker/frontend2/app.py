@@ -10,6 +10,7 @@ LOG_FILE = os.path.join(os.path.dirname(__file__), "fingerprint_log.json")
 
 # ---------- helpers ----------
 
+
 def load_logs():
     """Load all fingerprint log entries as a list."""
     if not os.path.exists(LOG_FILE):
@@ -27,6 +28,7 @@ def load_logs():
 
 
 # ---------- main routes ----------
+
 
 @app.route("/")
 def login():
@@ -62,14 +64,11 @@ def log_fingerprint():
         "ip": ip,
         "session_id": session_id,
         "timestamp": now,
-
         "captcha_passed": captcha_passed,
         "final_allowed": final_allowed,
         "attempt_index": attempt_index,
-
         "is_human": is_human,
         "risk_score": risk_score,
-
         "features": features,
         "classification": classification,
         "events": events,
@@ -85,6 +84,7 @@ def log_fingerprint():
 
 
 # ---------- admin pages / APIs ----------
+
 
 @app.route("/admin")
 def admin():
@@ -115,15 +115,17 @@ def api_summary():
 
     unique_ips = len({e.get("ip", "unknown") for e in logs})
 
-    return jsonify({
-        "total_runs": total_runs,
-        "total_captcha_passed": total_captcha_passed,
-        "total_final_allowed": total_final_allowed,
-        "human_runs": human_runs,
-        "bot_runs": bot_runs,
-        "suspicious_runs": suspicious_runs,
-        "unique_ips": unique_ips,
-    })
+    return jsonify(
+        {
+            "total_runs": total_runs,
+            "total_captcha_passed": total_captcha_passed,
+            "total_final_allowed": total_final_allowed,
+            "human_runs": human_runs,
+            "bot_runs": bot_runs,
+            "suspicious_runs": suspicious_runs,
+            "unique_ips": unique_ips,
+        }
+    )
 
 
 @app.route("/api/sessions")
@@ -157,7 +159,7 @@ def api_sessions():
         else:
             # Failed the puzzle itself
             return "blocked_failed"
-    
+
     rows = []
     for e in logs:
         v = compute_verdict(e)
@@ -170,17 +172,19 @@ def api_sessions():
             if verdict_filter == "blocked" and v == "allowed":
                 continue
 
-        rows.append({
-            "timestamp": e.get("timestamp"),
-            "ip": e.get("ip", "unknown"),
-            "session_id": e.get("session_id", "unknown"),
-            "captcha_passed": e.get("captcha_passed"),
-            "final_allowed": e.get("final_allowed"),
-            "is_human": e.get("is_human"),
-            "risk_score": e.get("risk_score", 0),
-            "attempt_index": e.get("attempt_index"),
-            "verdict": v,
-        })
+        rows.append(
+            {
+                "timestamp": e.get("timestamp"),
+                "ip": e.get("ip", "unknown"),
+                "session_id": e.get("session_id", "unknown"),
+                "captcha_passed": e.get("captcha_passed"),
+                "final_allowed": e.get("final_allowed"),
+                "is_human": e.get("is_human"),
+                "risk_score": e.get("risk_score", 0),
+                "attempt_index": e.get("attempt_index"),
+                "verdict": v,
+            }
+        )
 
         if len(rows) >= limit:
             break
@@ -189,4 +193,4 @@ def api_sessions():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True)

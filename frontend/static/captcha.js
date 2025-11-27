@@ -30,6 +30,12 @@ const TIME_BAR_FILL = [80, 140, 255];
 const MIN_SPEED = 25;
 const MAX_SPEED = 40;
 
+// One ID per CAPTCHA popup
+const SESSION_ID =
+  (window.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : "sess_" + Math.random().toString(36).slice(2) + "_" + Date.now();
+
 let game = null;
 let attempts = 0;
 
@@ -336,6 +342,7 @@ function sendFingerprintToServer(events, features, classification, meta) {
       events,
       features,
       classification,
+      session_id: SESSION_ID,
       ...meta,
     }),
   }).catch((err) => {

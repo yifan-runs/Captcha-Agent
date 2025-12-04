@@ -1,13 +1,22 @@
+### VLM Attacker OBS Virtual Camera Replacement
+# to allow for headless browser video capture and control
+# Sebastian Damodar Slawski
+# 21367338
+###
+
 import time, cv2, numpy as np
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+import random
 
 class SeleniumPortal:
     def __init__(self, url, canvas_selector="#captchaCanvas", headless=True):
         o = Options()
         if headless:
-            o.add_argument("--headless=new")
+            o.add_argument("--headless")
+            o.add_argument("--no-sandbox")
+            o.add_argument("--disable-dev-shm-usage")
             o.add_argument("--disable-gpu")
         self.driver = webdriver.Chrome(options=o)
         self.driver.set_window_size(800, 600)
@@ -79,9 +88,14 @@ class SeleniumPortal:
             t = tween(i / steps)
             mx = sx + (tx - sx) * t
             my = sy + (ty - sy) * t
+            if i < steps:
+                # Jitter until the last step
+                mx += random.randint(-5, 5)
+                my += random.randint(-5, 5)
             mx = max(0, min(self._canvas_w - 1, mx))
             my = max(0, min(self._canvas_h - 1, my))
-            self._dispatch_mouse_event("mousemove", mx, my)
+            self._dispatch_mouse_event("mousemove", int(mx), int(my))
+            self._pos = (int(mx), int(my))
             time.sleep(duration / steps)
 
         self._pos = (tx, ty)

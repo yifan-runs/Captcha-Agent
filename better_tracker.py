@@ -1,29 +1,32 @@
+### VLM Tracking Assistant (new)
+# Also aproximates bubble diameter, so that VLM does not have to
+# Sebastian Damodar Slawski
+# 21367338
+###
+
 import cv2
 import numpy as np
 import math
 import queue
 import threading
 import time
-from typing import Tuple, List, Dict, Generator, Optional
+from typing import Tuple, List, Dict
 from selenium_portal import SeleniumPortal
 
-def fit_circle_ls(pts: np.ndarray) -> Tuple[float, float, float]:
+def fit_circle_ls(pts: np.ndarray):
     """
-    Least-squares circle fit: x^2 + y^2 + ax + by + c = 0
-    -> centre (cx, cy), radius r
-    Works even if circle is partially visible.
+    least-squares circle fit: x^2 + y^2 + ax + by + c = 0
     """
     x = pts[:, 0]
     y = pts[:, 1]
     A = np.c_[2 * x, 2 * y, np.ones_like(x)]
-    b = x**2 + y**2
-    a, b_, c = np.linalg.lstsq(A, b, rcond=None)[0]
+    b = x ** 2 + y ** 2
+    a, b_, c = np.linalg.lstsq(A, b, rcond = None)[0]
     cx, cy = a, b_
     r = math.sqrt(cx * cx + cy * cy + c)
     return float(cx), float(cy), float(r)
 
-
-def detect_bubbles(frame: np.ndarray, min_area: float = 150.0, min_points: int = 20) -> List[Dict]:
+def detect_bubbles(frame: np.ndarray, min_area: float = 150.0, min_points: int = 20):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     h, s, v = cv2.split(hsv)
     mask = ((s > 60) & (v > 80)).astype("uint8") * 255
@@ -43,7 +46,7 @@ def detect_bubbles(frame: np.ndarray, min_area: float = 150.0, min_points: int =
         pts = c.reshape(-1, 2).astype(np.float32)
         try:
             cx, cy, r = fit_circle_ls(pts)
-        except np.linalg.LinAlgError:
+        except Exception:
             continue
 
         if r < 5:
@@ -61,7 +64,6 @@ def detect_bubbles(frame: np.ndarray, min_area: float = 150.0, min_points: int =
 
     return detections
 
-
 def _greedy_match(cost: np.ndarray):
     nT, nD = cost.shape
     pairs: List[Tuple[int, int]] = []
@@ -75,32 +77,6 @@ def _greedy_match(cost: np.ndarray):
         usedT.add(i)
         usedD.add(j)
     return pairs
-
-
-def create_kalman(x: float, y: float, r: float):
-    kf = cv2.KalmanFilter(5, 3)
-    dt = 1.0
-
-    kf.transitionMatrix = np.array([
-        [1, 0, dt, 0, 0],
-        [0, 1, 0, dt, 0],
-        [0, 0, 1,  0, 0],
-        [0, 0, 0,  1, 0],
-        [0, 0, 0,  0, 1],
-    ], np.float32)
-
-    kf.measurementMatrix = np.array([
-        [1, 0, 0, 0, 0],
-        [0, 1, 0, 0, 0],
-        [0, 0, 0, 0, 1],
-    ], np.float32)
-
-    kf.processNoiseCov = np.eye(5, dtype=np.float32) * 1e-3
-    kf.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-1
-    kf.errorCovPost = np.eye(5, dtype=np.float32)
-    kf.statePost = np.array([[x], [y], [0.0], [0.0], [r]], np.float32)
-    return kf
-
 
 def match_tracks(
     tracks: Dict[int, Dict],
@@ -130,7 +106,7 @@ def match_tracks(
             cost[ti, dj] = pos_w * pos_dist + r_w * r_dist + col_w * col_dist
 
     pairs = _greedy_match(cost)
-    matches: List[Tuple[int, int]] = []
+    matches = []
     unmatched_tracks = set(track_ids)
     unmatched_dets = set(range(len(detections)))
     for r, c in pairs:
@@ -196,6 +172,31 @@ def kalman_tracker(
     tracks: Dict[int, Dict] = {}
     retired_tracks: Dict[int, Dict] = {}
     frame_idx = 0
+
+    def create_kalman(x: float, y: float, r: float):
+        kf = cv2.KalmanFilter(5, 3)
+        dt = 1.0
+
+        kf.transitionMatrix = np.array([
+            [1, 0, dt, 0, 0],
+            [0, 1, 0, dt, 0],
+            [0, 0, 1,  0, 0],
+            [0, 0, 0,  1, 0],
+            [0, 0, 0,  0, 1],
+        ], np.float32)
+
+        kf.measurementMatrix = np.array([
+            [1, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0],
+            [0, 0, 0, 0, 1],
+        ], np.float32)
+
+        kf.processNoiseCov = np.eye(5, dtype=np.float32) * 1e-3
+        kf.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-1
+        kf.errorCovPost = np.eye(5, dtype=np.float32)
+        kf.statePost = np.array([[x], [y], [0.0], [0.0], [r]], np.float32) # x, y, vx, vy, r
+        return kf
+
     try:
         while True:
             if stop_event is not None and stop_event.is_set():
@@ -358,7 +359,7 @@ if __name__ == "__main__":
     import sys
 
     portal = SeleniumPortal("http://127.0.0.1:5000/captcha")
-    q: queue.Queue[Tuple[np.ndarray, List[Dict]]] = queue.Queue(maxsize=1)
+    q: queue.Queue = queue.Queue(maxsize=1)
     stop_ev = threading.Event()
     worker = threading.Thread(
         target=kalman_tracker_worker,

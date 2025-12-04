@@ -1,7 +1,12 @@
+### VLM Attacker
+# Sebastian Damodar Slawski
+# 21367338
+###
+
 import threading
 import queue
 import time
-from typing import Tuple, List, Dict
+from typing import Tuple
 import ollama
 from better_tracker import kalman_tracker_worker
 import cv2
@@ -10,16 +15,16 @@ import json
 from selenium_portal import SeleniumPortal
 
 def jitter_tween_factory(jitter_strength: float = 0.05):
-    def jitter_tween(t: float) -> float:
+    def jitter_tween(t: float):
         base = t * t * (3 - 2 * t)
         jitter = (random.random() - 0.5) * 2 * jitter_strength
         v = base + jitter
         return max(0.0, min(1.0, v))
     return jitter_tween
 
-jitter_tween = jitter_tween_factory(float(random.randrange(40, 80)) * 0.001)
+jitter_tween = jitter_tween_factory(0.30)
 
-sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:8080/captcha")
+sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:5000/captcha")
 q: queue.Queue[Tuple] = queue.Queue(maxsize=1)
 stop_ev = threading.Event()
 tracker_thread = threading.Thread(
@@ -119,8 +124,8 @@ try:
             obj = next((r for r in valid_readings if r["id"] == cid), None)
             if obj:
                 x, y = obj["cx"], obj["cy"]
-                sp.moveTo(x, y, duration=(random.randrange(80, 160) * 0.001), tween=jitter_tween)
-                sp.mouseDown(duration=(random.randrange(20, 50) * 0.001))
+                sp.moveTo(x, y, duration=(random.randrange(80, 120) * 0.001), tween=jitter_tween)
+                sp.mouseDown(duration=(random.randrange(10, 20) * 0.001))
                 sp.mouseUp()
 
 finally:

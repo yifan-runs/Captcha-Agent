@@ -1,4 +1,6 @@
-// fingerprinting.js
+// analyses mouse movement and click events to compute features
+// and classify whether the user is human or bot-like.
+// Contributors: Ayush and Amar
 
 const FP_MAX_DURATION = 20.0;
 

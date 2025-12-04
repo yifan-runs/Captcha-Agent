@@ -3,6 +3,8 @@ custom_agent_browser.py
 
 Agent that finds a  CAPTCHA browser window by title, OCRs the HUD,
 tracks bubbles in the canvas area, and clicks the correct bubbles (hopefully).
+
+Contributors: Shreya and Amar
 """
 
 import platform
@@ -118,7 +120,7 @@ def bezier_move_mouse(start_x, start_y, end_x, end_y, duration_override=None, ma
     if duration_override is not None:
         duration = max(0.01, float(duration_override))
     else:
-        # shorter divisor -> faster overall. tuned to increase speed (performance was meh before)
+        # shorter divisor so faster overall. tuned to increase speed (performance was meh before)
         duration = min(max_time, max(0.01, dist / 1350.0))
 
     # produce a small curvature
@@ -265,7 +267,7 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
 
         # Try to find number and ordering word
         number_match = re.search(r"\b(2|3)\b", text)
-        order_match = re.search(r"(ascending|descending)", text, re.I)
+        order_match = re.search(r"\b(a?scending|d[e3]scending|desoending)\b", text, re.IGNORECASE)
 
         if number_match and order_match:
             instr = {
@@ -313,7 +315,7 @@ def bubble_tracking_thread():
 
     x, y, w, h = coords["x"], coords["y"], coords["width"], coords["height"]
     title_offset = 0 if platform.system() == "Darwin" else 30
-    automation_bar_height = 30  # estimated for Selenium/Chrome
+    automation_bar_height = 30  # estimate for Selenium
     title_offset += automation_bar_height
     play_region = (
         x + 10,
@@ -389,7 +391,7 @@ def bubble_tracking_thread():
         time.sleep(1 / TRACK_FPS)
 
 # -------------------------
-# Clicker Thread (Updated with FAST Bézier movement)
+# Clicker Thread
 # -------------------------
 def choose_targets_and_click():
     last_burst_sizes = []

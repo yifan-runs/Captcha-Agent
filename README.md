@@ -46,6 +46,58 @@ The agent will connect to the CAPTCHA, track the bubbles, and attempt to solve t
 
 - The custom agent uses OCR and mouse automation to interact with the CAPTCHA, so ensure the required libraries (pyautogui, pytesseract, opencv-python, etc.) are installed.
 
+## Brute Force Attacker
+
+This project is an automated testing script based on **Python + Selenium + Chromium**, designed for:
+
+* Performing automated interaction testing on **CAPTCHA pages that we have built ourselves**
+* Using multiple "brute force" style interaction strategies to test how the CAPTCHA component behaves under different interaction paths, and to verify whether the system’s response and protection logic are robust
+
+**a. Install Dependencies**
+
+    Make sure the following are installed:
+
+    * Python 3.x
+    * Selenium
+    * Chromium / Chrome browser
+    * Matching version of ChromeDriver
+
+run install.sh
+
+---
+
+**b. Start Your Local CAPTCHA Page**
+
+For example, if you run a Flask server:
+
+```bash
+python app.py
+```
+
+Make sure it can be accessed via:
+
+```
+http://127.0.0.1:3000/captcha
+```
+
+---
+
+**c. Run the Script**
+
+In the project directory, execute:
+
+```bash
+python run_attacker.py
+```
+
+The script will:
+
+1. Start the browser
+2. Open your local CAPTCHA page
+3. Execute multiple interaction testing strategies
+4. Save screenshots and logs
+5. Safely close the browser
+
 ## **VLM attacker**
 
 This is a simple script where a vision language model clicks on moving bubbles in a captcha.

@@ -86,7 +86,7 @@ class BubbleCaptchaSolver:
                 return False
 
             # Directly access CAPTCHA page (skip login page)
-            captcha_url = "http://127.0.0.1:5000/captcha"
+            captcha_url = "http://127.0.0.1:3000/captcha"
             print(f"Accessing CAPTCHA page directly: {captcha_url}")
             self.driver.get(captcha_url)
             

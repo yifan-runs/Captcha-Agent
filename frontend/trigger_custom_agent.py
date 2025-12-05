@@ -1,4 +1,9 @@
-#!/usr/bin/env python3
+"""
+Opens a Chrome browser to a login page, fills in credentials, clicks login to trigger
+a CAPTCHA popup, and starts a custom agent script to solve the CAPTCHA.
+
+Contributors: Shreya and Amar
+"""
 import subprocess
 import random
 import sys
@@ -9,26 +14,19 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 
-# ------------------------------
-# Utility: random string
-# ------------------------------
 def random_string(n=8):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
-# ------------------------------
-# Step 1: Launch Chrome + Login Page
-# ------------------------------
-def launch_login_page(url=" http://127.0.0.1:5000"):
+# Launch Chrome + Login Page
+def launch_login_page(url=" http://127.0.0.1:8080"):
     chrome_options = Options()
-    chrome_options.add_experimental_option("detach", True)   # keep chrome open
+    chrome_options.add_experimental_option("detach", True)
 
     driver = webdriver.Chrome(options=chrome_options)
     driver.get(url)
     return driver
 
-# ------------------------------
-# Step 2: Fill username & password
-# ------------------------------
+# Fill username & password
 def fill_credentials(driver):
     user = "User123"
     password = "Password123!"
@@ -38,22 +36,18 @@ def fill_credentials(driver):
 
     print(f"[+] Entered username={user}, pwd={password}")
 
-# ------------------------------
-# Step 3: Click the Login button 
-# (this opens the CAPTCHA popup window)
-# ------------------------------
+# Click the Login button 
+# (opens the CAPTCHA popup)
 def click_login(driver):
     driver.find_element(By.TAG_NAME, "button").click()
     print("[+] Login clicked - CAPTCHA window should open")
 
-    # Give small delay for popup to appear
+    # delay for popup
     time.sleep(1.5)
 
-# ------------------------------
-# Step 4: Start captcha-solving agent
-# ------------------------------
+# Start captcha-solving agent
 def start_agent():
-    python_exe = sys.executable  # path to current python.exe
+    python_exe = sys.executable
     agent_script = r"C:\Users\shrey\Desktop\Ireland\Trinity\academics\scalable computing\mainproject2\scalable_project2\frontend\custom_agent_browser.py"
 
     print("[+] Starting custom agent...")
@@ -61,9 +55,7 @@ def start_agent():
     print("[+] Agent started with PID:", p.pid)
     return p
 
-# ------------------------------
 # MAIN WORKFLOW
-# ------------------------------
 def main():
     print("[=== START AUTOMATION ===]")
 

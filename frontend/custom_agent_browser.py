@@ -1,9 +1,10 @@
-#!/usr/bin/env python3
 """
 custom_agent_browser.py
 
-Agent that finds a browser window by title (substring), OCRs the HUD (canvas top),
-tracks bubbles in the canvas area, and clicks the correct bubbles.
+Agent that finds a  CAPTCHA browser window by title, OCRs the HUD,
+tracks bubbles in the canvas area, and clicks the correct bubbles (hopefully).
+
+Contributors: Shreya and Amar
 """
 
 import platform
@@ -16,12 +17,12 @@ from datetime import datetime
 
 import pyautogui
 import pytesseract
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # adjust as needed
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # adjust as needed (especially on Windows we might need this)
 import numpy as np
 import cv2
 import random
 
-# optional: pygetwindow for Windows/Linux
+# pygetwindow for Windows/Linux
 try:
     import pygetwindow as gw
 except Exception:
@@ -34,18 +35,16 @@ if platform.system() == "Darwin":
     except Exception:
         CGWindowListCopyWindowInfo = None
 
-# -------------------------
 # Config
-# -------------------------
 WINDOW_TITLE_SUBSTR = "Bubble CAPTCHA"
 HUD_HEIGHT = 56
 HUD_LEFT_MARGIN = 11
 HUD_RIGHT_MARGIN = 11
-PLAY_TOP_MARGIN = 12         # distance from HUD bottom to play area (approx)
-PLAY_BOTTOM_MARGIN = 40      # footer area size in your game
-TRACK_FPS = 25
+PLAY_TOP_MARGIN = 12         
+PLAY_BOTTOM_MARGIN = 40
+TRACK_FPS = 30
 CLICK_DELAY = 0.12
-MAX_OCR_ATTEMPTS = 20
+MAX_OCR_ATTEMPTS = 15
 
 HOUGH_DP = 1.2
 HOUGH_MIN_DIST = 30
@@ -72,9 +71,7 @@ shared_state = {
 }
 
 
-# -------------------------
 # Logging
-# -------------------------
 def log_event(event_type, **kwargs):
     shared_state["events"].append({
         "time": time.time(),
@@ -82,17 +79,15 @@ def log_event(event_type, **kwargs):
         **kwargs
     })
 
-# -------------------------
 # Ensure tesseract exists
-# -------------------------
 def ensure_tesseract():
-    """Try to ensure pytesseract.tesseract_cmd is set; if not, attempt to find tesseract."""
+    """ attempt to find tesseract."""
     if getattr(pytesseract.pytesseract, "tesseract_cmd", None):
         return
     if shutil.which("tesseract"):
         pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
         return
-    # Windows common path fallback
+    # Windows path fallback
     if platform.system() == "Windows":
         candidate = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
         if shutil.os.path.exists(candidate):
@@ -100,14 +95,11 @@ def ensure_tesseract():
             return
     raise FileNotFoundError("Tesseract not found on system.")
 
-# -------------------------
-# Bézier mouse movement — REPLACED WITH FAST VERSION
-# -------------------------
+# Bézier mouse movement
 def bezier_move_mouse(start_x, start_y, end_x, end_y, duration_override=None, max_time=0.04):
     """
     Fast human-like movement along a cubic Bézier curve.
-      - Uses a small number of steps and issues moveTo() with duration per step
-        so the OS performs smooth motion instead of many tiny immediate jumps.
+      - Uses a small number of steps and issues moveTo() with duration per step, so the OS performs smoother motion instead of many tiny fast jumps.
       - duration scales with distance but stays very short for responsiveness.
       - max_time controls the maximum total duration (seconds).
     """
@@ -116,23 +108,22 @@ def bezier_move_mouse(start_x, start_y, end_x, end_y, duration_override=None, ma
     dx, dy = tx - sx, ty - sy
     dist = math.hypot(dx, dy)
 
-    # duration: scale with distance but clamp; allow override
+    # scale duration with distance but with a limit
     if duration_override is not None:
         duration = max(0.01, float(duration_override))
     else:
-        # base scale: shorter divisor -> faster overall. tuned for speed.
+        # shorter divisor so faster overall
         duration = min(max_time, max(0.01, dist / 1350.0))
 
-    # control points produce a small curvature
+    # produce a small curvature
     cp1 = (sx + dx * 0.28 + random.uniform(-6, 6), sy + dy * 0.28 + random.uniform(-6, 6))
     cp2 = (sx + dx * 0.72 + random.uniform(-6, 6), sy + dy * 0.72 + random.uniform(-6, 6))
 
-    # steps: small number (4-10) for fast moves; ensures each step has a non-zero duration
-    steps = max(4, min(10, int(duration * 120)))  # keep it small and bounded
+    # small number of steps (4-10) for fast moves
+    steps = max(4, min(10, int(duration * 120)))
 
     log_event("bezier_move_start", start=(sx, sy), target=(tx, ty), dist=dist, duration=duration, steps=steps)
 
-    # do moves using pyautogui.moveTo with a short per-step duration so OS handles interpolation
     for i in range(1, steps + 1):
         t = i / steps
         omt = (1 - t)
@@ -140,41 +131,39 @@ def bezier_move_mouse(start_x, start_y, end_x, end_y, duration_override=None, ma
         x = (omt**3)*sx + 3*(omt**2)*t*cp1[0] + 3*omt*(t**2)*cp2[0] + (t**3)*tx
         y = (omt**3)*sy + 3*(omt**2)*t*cp1[1] + 3*omt*(t**2)*cp2[1] + (t**3)*ty
 
-        # micro-jitter (rare)
+        # micro-jitter
         if random.random() < 0.08 and i not in (steps, 1):
             x += random.gauss(0, 0.9)
             y += random.gauss(0, 0.9)
 
-        # per-step duration ensures smooth OS-level interpolation
+        # per-step duration
         per_step_dur = duration / steps
         try:
             cx1, cy1 = shared_state["window_coords"]["x"] + 10, shared_state["window_coords"]["y"]
             cx2 = cx1 + shared_state["window_coords"]["width"] - 20
             cy2 = cy1 + shared_state["window_coords"]["height"]
 
-            # Ensure click inside
+            # Ensure click inside our frame
             if not (cx1 <= tx <= cx2 and cy1 <= ty <= cy2):
                 print("[WARN] Prevented click outside canvas")
                 continue
 
             pyautogui.moveTo(int(x), int(y), duration=per_step_dur)
         except Exception:
-            # fallback to instantaneous move if moveTo fails
             try:
                 pyautogui.moveTo(int(x), int(y))
             except Exception:
                 pass
 
-    # final exact move (ensure we end exactly at the target)
+    # ensure we end exactly at the target
     try:
         pyautogui.moveTo(int(tx), int(ty), duration=0)
     except Exception:
         pass
 
     log_event("bezier_move_end", final=(tx, ty), duration=duration)
-# -------------------------
+    
 # Window discovery
-# -------------------------
 def find_window_by_title_substr(substr=WINDOW_TITLE_SUBSTR, min_width=300, min_height=200):
     system = platform.system()
     if system in ("Windows", "Linux") and gw is not None:
@@ -205,9 +194,7 @@ def find_window_by_title_substr(substr=WINDOW_TITLE_SUBSTR, min_width=300, min_h
                     }
     return None
 
-# -------------------------
 # OCR Thread
-# -------------------------
 import re
 def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
     ensure_tesseract()
@@ -241,14 +228,14 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
         print("[OCR] reads:", text)
         log_event("ocr_text", raw=text)
         
-        # --- SUCCESS DETECTION ---
+        # SUCCESS DETECTION
         success_patterns = [
             r"captcha\s+passed",
             r"captcha\s+assed",
             r"you\s+may\s+proceed"
         ]
         
-        # --- FAILURE DETECTION ---
+        # FAILURE DETECTION
         fail_patterns = [
             r"captcha\s+failed",
             r"try\s+again",
@@ -266,9 +253,8 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
             shared_state["running"] = False
             return
 
-        # Try to find number and ordering word
         number_match = re.search(r"\b(2|3)\b", text)
-        order_match = re.search(r"(ascending|descending)", text, re.I)
+        order_match = re.search(r"\b(a?scending|d[e3]scending|desoending)\b", text, re.IGNORECASE)
 
         if number_match and order_match:
             instr = {
@@ -286,9 +272,7 @@ def ocr_read_hud_thread(max_attempts=MAX_OCR_ATTEMPTS):
     print("[OCR] failed after attempts.")
     log_event("ocr_failed")
 
-# -------------------------
 # Bubble Tracking Thread
-# -------------------------
 def color_name_from_bgr(bgr_pixel):
     b, g, r = bgr_pixel
     best, bestd = None, float("inf")
@@ -316,7 +300,7 @@ def bubble_tracking_thread():
 
     x, y, w, h = coords["x"], coords["y"], coords["width"], coords["height"]
     title_offset = 0 if platform.system() == "Darwin" else 30
-    automation_bar_height = 30  # estimated for Selenium/Chrome
+    automation_bar_height = 30  # estimate for Selenium
     title_offset += automation_bar_height
     play_region = (
         x + 10,
@@ -391,13 +375,10 @@ def bubble_tracking_thread():
 
         time.sleep(1 / TRACK_FPS)
 
-# -------------------------
-# Clicker Thread (Updated with FAST Bézier movement)
-# -------------------------
+# Clicker Thread
 def choose_targets_and_click():
     last_burst_sizes = []
 
-    # wait for instruction
     while shared_state["running"] and shared_state.get("instruction") is None:
         time.sleep(0.1)
 
@@ -490,9 +471,7 @@ def choose_targets_and_click():
         
     print("[CLICKER] exiting persistent clicker loop.")
 
-# -------------------------
 # Main Runner
-# -------------------------
 def main():
     print("Agent starting…")
 
@@ -506,7 +485,7 @@ def main():
         shared_state["instruction"] = None
         shared_state["bubbles"] = []
         shared_state["running"] = True
-        # IMPORTANT: reset failure flag for a clean new round
+        # Reset failure flag for a clean new round
         shared_state["captcha_failed"] = False
 
         t_track = threading.Thread(target=bubble_tracking_thread, daemon=True)

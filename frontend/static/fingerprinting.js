@@ -1,4 +1,6 @@
-// fingerprinting.js
+// analyses mouse movement and click events to compute features
+// and classify whether the user is human or bot-like.
+// Contributors: Ayush and Amar
 
 const FP_MAX_DURATION = 20.0;
 
@@ -63,7 +65,7 @@ function computeFeaturesFromEvents(events) {
     feats.ici_cv = 0.0;
   }
 
-  // B. Movement / path
+  // B. Movement
   const { avg_speed, max_speed, curvature_mean, teleport_fraction, speed_std } =
     pathFeatures(moves, clicks);
   feats.avg_speed = avg_speed;
@@ -80,7 +82,7 @@ function computeFeaturesFromEvents(events) {
   feats.offset_mean = offset_mean;
   feats.offset_std = offset_std;
 
-  // D. Errors / brute-force
+  // D. Errors
   let incorrectClicks = 0;
   let emptyClicks = 0;
   for (const e of clicks) {
@@ -99,7 +101,7 @@ function computeFeaturesFromEvents(events) {
   feats.empty_click_ratio = totalClicks > 0 ? emptyClicks / totalClicks : 0.0;
   feats.clicks_per_second = totalTime > 0 ? totalClicks / totalTime : 0.0;
 
-  // E. Exploration / attention
+  // E. Attention
   const visitedInstr = moves.some((e) => e.my >= 0 && e.my <= 60);
   feats.visited_instruction_area = visitedInstr ? 1.0 : 0.0;
 
@@ -283,9 +285,7 @@ function classifyFingerprint(features, captchaPassed) {
 
   const curvature_mean = features.curvature_mean ?? 1.0;
 
-  // =======================================================
-  // 1) Teleport / Impossible Movement
-  // =======================================================
+  // 1) Teleportation
   if (tele > 0.15) {
     suspicious = true;
     reasons.push("teleport_fraction_high");
@@ -298,9 +298,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_movement += 0.3;
   }
 
-  // =======================================================
   // 2) Reaction Timing Thresholds
-  // =======================================================
   // Bots show < 0.22s reaction time and < 0.30s mean timing
   if (rt_first < 0.22 && rt_mean < 0.3) {
     suspicious = true;
@@ -309,9 +307,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_timing += 0.3;
   }
 
-  // =======================================================
   // 3) Inter-Click Timing Regularity
-  // =======================================================
   // Bots: ici_cv < 0.12 AND ici_mean < 0.45
   let regularity_score = 0.0;
   if (ici_cv < 0.12 && ici_mean < 0.45) {
@@ -322,9 +318,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_timing += 0.2;
   }
 
-  // =======================================================
   // 4) Mouse Speed Profile
-  // =======================================================
   // Bots: avg_speed > 550 px/s AND speed_std < 250
   if (avg_speed > 550 && speed_std < 250) {
     suspicious = true;
@@ -333,9 +327,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_movement += 0.25;
   }
 
-  // =======================================================
   // 5) Path Density (moves per click)
-  // =======================================================
   // Bots: few micro-adjustments
   if (click_count >= 2) {
     const moves_per_click = move_count / Math.max(1, click_count);
@@ -355,9 +347,7 @@ function classifyFingerprint(features, captchaPassed) {
     }
   }
 
-  // =======================================================
   // 6) Click Precision Thresholds
-  // =======================================================
   // Bots: < 3.5px mean and < 1.4px std deviation
   if (off_mean < 3.5 && off_std < 1.4) {
     suspicious = true;
@@ -366,9 +356,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_movement += 0.25;
   }
 
-  // =======================================================
   // 7) Empty Click / Brute-Force Patterns
-  // =======================================================
   if (empty_ratio > 0.45) {
     suspicious = true;
     reasons.push("empty_click_bruteforce_pattern");
@@ -396,9 +384,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_errors += 0.25;
   }
 
-  // =======================================================
   // 8) Human Attention Markers
-  // =======================================================
   if (visited_instr < 0.5 && rt_first < 0.35) {
     suspicious = true;
     reasons.push("did_not_read_instructions");
@@ -413,9 +399,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_attention += 0.15;
   }
 
-  // =======================================================
   // 9) Overall Time Usage
-  // =======================================================
   if (time_used < 0.15 && captchaPassed) {
     suspicious = true;
     reasons.push("very_fast_overall");
@@ -423,9 +407,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_timing += 0.15;
   }
 
-  // =======================================================
   // 10) Crucial Curvature gamechanger
-  // =======================================================
   if (curvature_mean < 1.03 && move_count > 8) {
     suspicious = true;
     reasons.push("straight_line_movement");
@@ -433,9 +415,7 @@ function classifyFingerprint(features, captchaPassed) {
     risk_movement += 0.2;
   }
 
-  // =======================================================
   // FINAL DECISION
-  // =======================================================
   risk = Math.max(0, Math.min(1, risk));
 
   let is_human;

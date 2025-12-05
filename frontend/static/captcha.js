@@ -1,3 +1,7 @@
+// Runs the bubble CAPTCHA game logic and rendering in the canvas.
+// Also logs user interaction events for fingerprinting analysis.
+// Contributors: Amar,Ayush and Shreya
+
 const canvas = document.getElementById("captchaCanvas");
 const ctx = canvas.getContext("2d");
 
@@ -49,7 +53,7 @@ function randomVelocity() {
   return [vx, vy];
 }
 
-// ===== Fingerprinting event log =====
+// Fingerprinting event log
 const events = [];
 
 function nowSeconds() {
@@ -142,7 +146,7 @@ function initGame() {
 
   const DISTINCT_RADII = [15, 30, 50, 65, 80]; // fixed distinct sizes
   const radii = [...DISTINCT_RADII];
-  radii.sort(() => Math.random() - 0.5); // shuffle for randomness
+  radii.sort(() => Math.random() - 0.5); // randomness shuffle
 
   const gameState = {
     instruction: instruction,
@@ -197,7 +201,7 @@ function initGame() {
 function handleClick(mx, my) {
   if (game.state != "RUNNING") return;
 
-  // Iterate from top-most to bottom-most (reverse draw order)
+  // reverse draw order
   let clicked = null;
   for (let i = game.bubbles.length - 1; i >= 0; i--) {
     const b = game.bubbles[i];
@@ -216,7 +220,8 @@ function handleClick(mx, my) {
     //}
   //}
 
-  // no bubble hit -> empty click
+
+  // no bubble hit = empty click
   if (!clicked) {
     logEvent("empty_click", { mx, my });
     return;
@@ -238,7 +243,7 @@ function handleClick(mx, my) {
     }
   }
 
-  // log the bubble click for fingerprinting
+  // log bubble click for fingerprinting
   logEvent("bubble_click", {
     mx,
     my,
@@ -380,7 +385,7 @@ function loop() {
       game.result_logged = true;
       game.result_display_until = now + RESULT_DISPLAY_TIME;
 
-      // mark end of session for fingerprinting
+      // end of session for fingerprinting
       logEvent("captcha_result", {
         result: game.state,
         clicked_sizes: [...game.clicked_sizes],
@@ -388,14 +393,14 @@ function loop() {
       });
       logEvent("session_end");
     } else if (now >= game.result_display_until) {
-      // === FINGERPRINTING: compute features + classification ===
+      // fingerprinting: compute features + classification
       const features = computeFeaturesFromEvents(events);
       const classification = classifyFingerprint(
         features,
         game.state === "PASSED"
       );
 
-      // === METADATA for logging ===
+      // METADATA for logging
       const captchaPassed = game.state === "PASSED";
       const isHuman = !!classification.is_human;
       const finalAllowed = captchaPassed && isHuman; // only true in the “real human + correct” case
@@ -424,14 +429,13 @@ function loop() {
         window.close();
       }
 
-      // ───────── CASE 1: correct bubbles + human-like behaviour ─────────
+      // CASE 1: correct bubbles + human-like behaviour
       if (game.state === "PASSED" && isHuman) {
-        //alert("CAPTCHA Passed! Human verified, you may proceed.");
         finishAndClose(true);
         return;
       }
 
-      // ───────── CASE 2: wrong bubbles (any behaviour) ─────────
+      // CASE 2: wrong bubbles (any behaviour)
       if (game.state === "FAILED") {
         attempts++;
         if (attempts <= 2) {
@@ -440,17 +444,15 @@ function loop() {
           lastTime = performance.now() / 1000;
         } else {
           // final fail after max attempts
-          //alert("CAPTCHA Failed. Try again later.");
           finishAndClose(false);
           return;
         }
-        // no return here -> let the loop continue and draw the new game
+        // no return here = let the loop continue and draw the new game
       }
 
-      // ───────── CASE 3: PASSED but classified as bot ─────────
+      // CASE 3: PASSED but classified as bot
       // (correct bubbles + non-human behaviour)
       if (game.state === "PASSED" && !isHuman) {
-        //alert("CAPTCHA Failed. Try again later.");
         finishAndClose(false);
         return;
       }

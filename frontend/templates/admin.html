@@ -125,7 +125,7 @@
       return "risk-low";
     }
 
-    // ----- SUMMARY CARDS -----
+    // SUMMARY CARDS
     async function loadSummary() {
       const res = await fetch("/api/summary");
       const data = await res.json();
@@ -144,7 +144,7 @@
         "Last updated: " + new Date().toLocaleTimeString();
     }
 
-    // ----- TABLE (RECENT SESSIONS) -----
+    // TABLE (RECENT SESSIONS)
     async function loadSessions() {
       const verdict = document.getElementById("filter-verdict").value;
       const ip = document.getElementById("filter-ip").value.trim();
@@ -218,7 +218,7 @@
       }
     }
 
-    // ----- CHARTS -----
+    // CHARTS
     let verdictChart = null;
     let humanChart = null;
     let ipChart = null;

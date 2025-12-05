@@ -24,7 +24,7 @@ def jitter_tween_factory(jitter_strength: float = 0.05):
 
 jitter_tween = jitter_tween_factory(0.30)
 
-sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:5000/captcha")
+sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:3000/captcha")
 q: queue.Queue[Tuple] = queue.Queue(maxsize=1)
 stop_ev = threading.Event()
 tracker_thread = threading.Thread(

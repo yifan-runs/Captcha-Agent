@@ -48,7 +48,7 @@ def click_login(driver):
 # Start captcha-solving agent
 def start_agent():
     python_exe = sys.executable
-    agent_script = r"C:\Users\shrey\Desktop\Ireland\Trinity\academics\scalable computing\mainproject2\scalable_project2\frontend\custom_agent_browser.py"
+    agent_script = "./frontend/custom_agent_browser.py"
 
     print("[+] Starting custom agent...")
     p = subprocess.Popen([python_exe, agent_script])

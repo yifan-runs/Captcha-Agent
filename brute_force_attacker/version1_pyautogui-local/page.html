@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Bubble Captcha - Strict Size Order</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            margin: 0;
+            padding: 10px;
+            text-align: center;
+        }
+
+        canvas {
+            border: 2px solid #333;
+            background: white;
+            display: block;
+            margin: auto;
+            cursor: crosshair;
+        }
+
+        #info {
+            margin: 10px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>Bubble Size Captcha</h2>
+    <div id="info"></div>
+
+    <canvas id="captchaCanvas" width="900" height="600"></canvas>
+
+    <script>
+        const rect = document.getElementById("captchaCanvas").getBoundingClientRect();
+        console.log(rect);
+
+        const canvas = document.getElementById("captchaCanvas");
+        const ctx = canvas.getContext("2d");
+
+        let bubbles = [];
+        let bubbleCount = 9;
+        let mode = Math.random() > 0.5 ? "ASC" : "DESC"; // ASC = smallest-first; DESC = largest-first
+        let startTime = Date.now();
+        let mouseTrack = [];
+        let spawnDelayedBubble = true;
+        let nextId = 1;
+
+        document.getElementById("info").innerText =
+            `Task: Click bubbles in ${mode === "ASC" ? "Ascending (small→large)" : "Descending (large→small)"} order by size`;
+
+        class Bubble {
+            constructor(x, y, r, dx, dy, id) {
+                this.x = x; this.y = y; this.r = r;
+                this.dx = dx; this.dy = dy;
+                this.alive = true;
+                this.id = id; // for deterministic tie resolution only
+            }
+            move() {
+                this.x += this.dx; this.y += this.dy;
+                if (this.x < this.r || this.x > canvas.width - this.r) this.dx *= -1;
+                if (this.y < this.r || this.y > canvas.height - this.r) this.dy *= -1;
+            }
+            draw() {
+                if (!this.alive) return;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+                ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.stroke();
+                ctx.fillStyle = "#444"; ctx.font = "14px Arial"; ctx.fillText(this.r, this.x - 8, this.y + 4);
+            }
+            isClicked(mx, my) {
+                const dist = Math.hypot(mx - this.x, my - this.y);
+                return dist <= this.r;
+            }
+        }
+
+        function initBubbles() {
+            bubbles = [];
+            for (let i = 0; i < bubbleCount; i++) {
+                const r = Math.floor(Math.random() * 30) + 20;
+                const x = Math.random() * (canvas.width - 2 * r) + r;
+                const y = Math.random() * (canvas.height - 2 * r) + r;
+                const dx = (Math.random() - 0.5) * 2;
+                const dy = (Math.random() - 0.5) * 2;
+                bubbles.push(new Bubble(x, y, r, dx, dy, nextId++));
+            }
+        }
+
+        // 增加一个延迟出现的大气泡（示例）
+        function addDelayedBubble() {
+            if (!spawnDelayedBubble) return;
+            spawnDelayedBubble = false;
+            const r = 60;
+            const x = Math.random() * (canvas.width - 2 * r) + r;
+            const y = Math.random() * (canvas.height - 2 * r) + r;
+            bubbles.push(new Bubble(x, y, r, 1, 1, nextId++));
+        }
+        setTimeout(addDelayedBubble, 3000);
+
+        // 记录鼠标轨迹（用于后续行为分析）
+        canvas.addEventListener("mousemove", (e) => {
+            mouseTrack.push({ x: e.offsetX, y: e.offsetY, t: Date.now() });
+        });
+
+        // 每次严格按当前活跃气泡的半径决定目标（返回目标气泡或 null）
+        function computeStrictTarget() {
+            const alive = bubbles.filter(b => b.alive);
+            if (alive.length === 0) return null;
+            // 找最小或最大半径
+            let target = alive[0];
+            for (let i = 1; i < alive.length; i++) {
+                const b = alive[i];
+                if (mode === "ASC") {
+                    if (b.r < target.r) target = b;
+                    else if (b.r === target.r && b.id < target.id) target = b; // tie-breaker deterministic
+                } else {
+                    if (b.r > target.r) target = b;
+                    else if (b.r === target.r && b.id < target.id) target = b;
+                }
+            }
+            return target;
+        }
+
+        // 点击处理：只有点击到当前严格 target 才视为成功并消失；点错静默
+        canvas.addEventListener("click", (e) => {
+            const mx = e.offsetX, my = e.offsetY;
+            const target = computeStrictTarget();
+            if (!target) return;
+            // 找到第一个被点击的存活气泡（若任意）
+            const hit = bubbles.find(b => b.alive && b.isClicked(mx, my));
+            if (!hit) return; // 点击空白，静默
+            if (hit === target) {
+                hit.alive = false;
+            } else {
+                // 点错：静默
+            }
+        });
+
+        // 动画主循环
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (const b of bubbles) { b.move(); b.draw(); }
+
+            // 全部消失 -> 成功
+            if (bubbles.length > 0 && bubbles.every(b => !b.alive)) {
+                const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                document.getElementById("info").innerText = `✅ Successful — Time: ${totalTime}s`;
+                console.log("Mouse Track:", mouseTrack);
+                return;
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        // 启动
+        initBubbles();
+        animate();
+    </script>
+
+</body>
+
+</html>

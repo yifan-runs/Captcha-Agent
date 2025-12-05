@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Dashboard - Anti-AI CAPTCHA</title>
+
+  <!-- Shared styles (also used by login) -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="admin-page">
+  <div class="admin-wrapper">
+    <div class="admin-header">
+      <div>
+        <h1>Admin Dashboard</h1>
+        <small>Behaviour analytics for the bubble CAPTCHA</small>
+      </div>
+      <small id="last-updated">Last updated: –</small>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="admin-summary-grid">
+      <div class="admin-card">
+        <div class="admin-card-title">Total Runs</div>
+        <div class="admin-card-value" id="sum-total-runs">0</div>
+        <div class="admin-card-sub">All CAPTCHA attempts (humans + bots)</div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-title">Final Allowed</div>
+        <div class="admin-card-value" id="sum-final-allowed">0</div>
+        <div class="admin-card-sub">Puzzle correct + behaviour human-like</div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-title">Blocked</div>
+        <div class="admin-card-value" id="sum-blocked">0</div>
+        <div class="admin-card-sub">Puzzle failed or behaviour suspicious</div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-title">Human vs Bot</div>
+        <div class="admin-card-value">
+          <span id="sum-human">0</span> / <span id="sum-bot">0</span>
+        </div>
+        <div class="admin-card-sub">Humans detected / Bot-like traces</div>
+      </div>
+      <div class="admin-card">
+        <div class="admin-card-title">Unique IPs</div>
+        <div class="admin-card-value" id="sum-ips">0</div>
+        <div class="admin-card-sub">Distinct clients in log</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="admin-chart-section-header">
+      <h2>Security Snapshot</h2>
+      <small>Based on the latest 200 sessions</small>
+    </div>
+
+    <div class="admin-chart-grid">
+      <div class="admin-card admin-chart-card">
+        <div class="admin-card-title">Verdict Breakdown</div>
+        <canvas id="verdictChart"></canvas>
+      </div>
+      <div class="admin-card admin-chart-card">
+        <div class="admin-card-title">Human vs Bot Behaviour</div>
+        <canvas id="humanChart"></canvas>
+      </div>
+      <div class="admin-card admin-chart-card">
+        <div class="admin-card-title">Top IPs by Attempts</div>
+        <canvas id="ipChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Sessions table -->
+    <div class="admin-table-section-header">
+      <h2>Recent Sessions</h2>
+      <div class="admin-table-filters">
+        <label>
+          Verdict:
+          <select id="filter-verdict">
+            <option value="all">All</option>
+            <option value="allowed">Allowed only</option>
+            <option value="blocked">Blocked only</option>
+          </select>
+        </label>
+        <label>
+          IP:
+          <input id="filter-ip" placeholder="127.0.0.1">
+        </label>
+        <button id="filter-apply">Apply</button>
+      </div>
+    </div>
+
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>IP</th>
+          <th>Session</th>
+          <th>Verdict</th>
+          <th>Captcha</th>
+          <th>Human?</th>
+          <th>Risk</th>
+          <th>Attempt #</th>
+        </tr>
+      </thead>
+      <tbody id="sessions-body">
+        <tr><td colspan="8" class="admin-empty-state">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    function formatTime(epochSeconds) {
+      if (!epochSeconds) return "–";
+      const d = new Date(epochSeconds * 1000);
+      return d.toLocaleString();
+    }
+
+    function riskClass(score) {
+      if (score == null) return "";
+      if (score >= 0.7) return "risk-high";
+      if (score >= 0.3) return "risk-mid";
+      return "risk-low";
+    }
+
+    // SUMMARY CARDS
+    async function loadSummary() {
+      const res = await fetch("/api/summary");
+      const data = await res.json();
+
+      document.getElementById("sum-total-runs").textContent = data.total_runs ?? 0;
+      document.getElementById("sum-final-allowed").textContent = data.total_final_allowed ?? 0;
+
+      const blocked = (data.total_runs || 0) - (data.total_final_allowed || 0);
+      document.getElementById("sum-blocked").textContent = blocked;
+
+      document.getElementById("sum-human").textContent = data.human_runs ?? 0;
+      document.getElementById("sum-bot").textContent = data.bot_runs ?? 0;
+      document.getElementById("sum-ips").textContent = data.unique_ips ?? 0;
+
+      document.getElementById("last-updated").textContent =
+        "Last updated: " + new Date().toLocaleTimeString();
+    }
+
+    // TABLE (RECENT SESSIONS)
+    async function loadSessions() {
+      const verdict = document.getElementById("filter-verdict").value;
+      const ip = document.getElementById("filter-ip").value.trim();
+
+      const params = new URLSearchParams();
+      params.set("limit", "100");
+      if (verdict !== "all") params.set("verdict", verdict);
+      if (ip) params.set("ip", ip);
+
+      const res = await fetch("/api/sessions?" + params.toString());
+      const data = await res.json();
+      const rows = data.sessions || [];
+
+      const tbody = document.getElementById("sessions-body");
+      tbody.innerHTML = "";
+
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 8;
+        td.className = "admin-empty-state";
+        td.textContent = "No sessions found for the current filters.";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      for (const s of rows) {
+        const tr = document.createElement("tr");
+
+        const tdTime = document.createElement("td");
+        tdTime.textContent = formatTime(s.timestamp);
+        tr.appendChild(tdTime);
+
+        const tdIp = document.createElement("td");
+        tdIp.textContent = s.ip || "unknown";
+        tr.appendChild(tdIp);
+
+        const tdSess = document.createElement("td");
+        tdSess.textContent = (s.session_id || "unknown").slice(0, 8) + "…";
+        tr.appendChild(tdSess);
+
+        const tdVerdict = document.createElement("td");
+        const badge = document.createElement("span");
+        badge.className = "badge " + (s.verdict === "allowed" ? "badge-allowed" : "badge-blocked");
+        badge.textContent = s.verdict.replace("_", " ");
+        tdVerdict.appendChild(badge);
+        tr.appendChild(tdVerdict);
+
+        const tdCaptcha = document.createElement("td");
+        tdCaptcha.textContent = s.captcha_passed ? "Puzzle OK" : "Puzzle failed";
+        tr.appendChild(tdCaptcha);
+
+        const tdHuman = document.createElement("td");
+        if (s.is_human === true) tdHuman.textContent = "Human";
+        else if (s.is_human === false) tdHuman.textContent = "Bot-like";
+        else tdHuman.textContent = "Unknown";
+        tr.appendChild(tdHuman);
+
+        const tdRisk = document.createElement("td");
+        const score = s.risk_score ?? 0;
+        tdRisk.textContent = typeof score === "number" ? score.toFixed(2) : score;
+        tdRisk.className = riskClass(score);
+        tr.appendChild(tdRisk);
+
+        const tdAttempt = document.createElement("td");
+        tdAttempt.textContent = s.attempt_index ?? "–";
+        tr.appendChild(tdAttempt);
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    // CHARTS
+    let verdictChart = null;
+    let humanChart = null;
+    let ipChart = null;
+
+    function buildCharts(sessions) {
+      const verdictCounts = {
+        allowed: 0,
+        blocked_failed: 0,
+        blocked_suspicious: 0,
+      };
+
+      const humanCounts = {
+        human: 0,
+        bot: 0,
+        unknown: 0,
+      };
+
+      const ipCounts = new Map();
+
+      for (const s of sessions) {
+        if (s.verdict === "allowed") verdictCounts.allowed++;
+        else if (s.verdict === "blocked_failed") verdictCounts.blocked_failed++;
+        else if (s.verdict === "blocked_suspicious") verdictCounts.blocked_suspicious++;
+
+        if (s.is_human === true) humanCounts.human++;
+        else if (s.is_human === false) humanCounts.bot++;
+        else humanCounts.unknown++;
+
+        const ip = s.ip || "unknown";
+        ipCounts.set(ip, (ipCounts.get(ip) || 0) + 1);
+      }
+
+      // Verdict chart
+      const vcLabels = ["Allowed", "Blocked (failed)", "Blocked (suspicious)"];
+      const vcData = [
+        verdictCounts.allowed,
+        verdictCounts.blocked_failed,
+        verdictCounts.blocked_suspicious,
+      ];
+      const verdictCtx = document.getElementById("verdictChart").getContext("2d");
+
+      if (verdictChart) {
+        verdictChart.data.labels = vcLabels;
+        verdictChart.data.datasets[0].data = vcData;
+        verdictChart.update();
+      } else {
+        verdictChart = new Chart(verdictCtx, {
+          type: "doughnut",
+          data: {
+            labels: vcLabels,
+            datasets: [{ data: vcData }],
+          },
+          options: {
+            plugins: {
+              legend: { position: "bottom" },
+            },
+            cutout: "55%",
+          },
+        });
+      }
+
+      // Human vs Bot chart
+      const hcLabels = ["Human", "Bot-like", "Unknown"];
+      const hcData = [
+        humanCounts.human,
+        humanCounts.bot,
+        humanCounts.unknown,
+      ];
+      const humanCtx = document.getElementById("humanChart").getContext("2d");
+
+      if (humanChart) {
+        humanChart.data.labels = hcLabels;
+        humanChart.data.datasets[0].data = hcData;
+        humanChart.update();
+      } else {
+        humanChart = new Chart(humanCtx, {
+          type: "doughnut",
+          data: {
+            labels: hcLabels,
+            datasets: [{ data: hcData }],
+          },
+          options: {
+            plugins: {
+              legend: { position: "bottom" },
+            },
+            cutout: "55%",
+          },
+        });
+      }
+
+      // Top IPs chart
+      const ipEntries = Array.from(ipCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+
+      const ipLabels = ipEntries.map(([ip]) => ip);
+      const ipData = ipEntries.map(([, count]) => count);
+
+      const ipCtx = document.getElementById("ipChart").getContext("2d");
+
+      if (ipChart) {
+        ipChart.data.labels = ipLabels;
+        ipChart.data.datasets[0].data = ipData;
+        ipChart.update();
+      } else {
+        ipChart = new Chart(ipCtx, {
+          type: "bar",
+          data: {
+            labels: ipLabels,
+            datasets: [{ data: ipData }],
+          },
+          options: {
+            indexAxis: "y",
+            plugins: { legend: { display: false } },
+            scales: {
+              x: {
+                beginAtZero: true,
+                ticks: { precision: 0 },
+              },
+            },
+          },
+        });
+      }
+    }
+
+    async function loadCharts() {
+      const params = new URLSearchParams();
+      params.set("limit", "200");
+      const res = await fetch("/api/sessions?" + params.toString());
+      const data = await res.json();
+      const sessions = data.sessions || [];
+      buildCharts(sessions);
+    }
+
+    // Wiring
+    document.getElementById("filter-apply").addEventListener("click", () => {
+      loadSessions();
+    });
+
+    // Initial load
+    loadSummary();
+    loadSessions();
+    loadCharts();
+
+    // Auto-refresh every 20s
+    setInterval(() => {
+      loadSummary();
+      loadSessions();
+      loadCharts();
+    }, 20000);
+  </script>
+</body>
+</html>

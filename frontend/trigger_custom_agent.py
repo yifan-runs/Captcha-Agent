@@ -17,20 +17,16 @@ from selenium.webdriver.chrome.options import Options
 def random_string(n=8):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
-# ------------------------------
 # Launch Chrome + Login Page
-# ------------------------------
 def launch_login_page(url=" http://127.0.0.1:8080"):
     chrome_options = Options()
-    chrome_options.add_experimental_option("detach", True)   # to keep chrome open
+    chrome_options.add_experimental_option("detach", True)
 
     driver = webdriver.Chrome(options=chrome_options)
     driver.get(url)
     return driver
 
-# ------------------------------
 # Fill username & password
-# ------------------------------
 def fill_credentials(driver):
     user = "User123"
     password = "Password123!"
@@ -40,22 +36,18 @@ def fill_credentials(driver):
 
     print(f"[+] Entered username={user}, pwd={password}")
 
-# ------------------------------
 # Click the Login button 
 # (opens the CAPTCHA popup)
-# ------------------------------
 def click_login(driver):
     driver.find_element(By.TAG_NAME, "button").click()
     print("[+] Login clicked - CAPTCHA window should open")
 
-    # delay for popup=
+    # delay for popup
     time.sleep(1.5)
 
-# ------------------------------
 # Start captcha-solving agent
-# ------------------------------
 def start_agent():
-    python_exe = sys.executable  # path to current python.exe, might need to change depending on diff laptops
+    python_exe = sys.executable
     agent_script = r"C:\Users\shrey\Desktop\Ireland\Trinity\academics\scalable computing\mainproject2\scalable_project2\frontend\custom_agent_browser.py"
 
     print("[+] Starting custom agent...")
@@ -63,9 +55,7 @@ def start_agent():
     print("[+] Agent started with PID:", p.pid)
     return p
 
-# ------------------------------
 # MAIN WORKFLOW
-# ------------------------------
 def main():
     print("[=== START AUTOMATION ===]")
 

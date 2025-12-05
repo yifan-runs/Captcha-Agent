@@ -15,7 +15,7 @@ echo "=== Starting local server ==="
 
 # 2. Start your application server
 if [ -f app.py ]; then
-    python ./brute_force_attacker/frontend2/app.py &
+    python ./frontend/app.py &
     SERVER_PID=$!
     sleep 3
 else

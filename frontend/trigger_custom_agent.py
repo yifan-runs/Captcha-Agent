@@ -18,7 +18,7 @@ def random_string(n=8):
     return ''.join(random.choices(string.ascii_letters + string.digits, k=n))
 
 # Launch Chrome + Login Page
-def launch_login_page(url=" http://127.0.0.1:8080"):
+def launch_login_page(url=" http://127.0.0.1:3000"):
     chrome_options = Options()
     chrome_options.add_experimental_option("detach", True)
 

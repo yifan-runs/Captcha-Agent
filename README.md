@@ -2,9 +2,13 @@
 
 This repository contains a simple interactive bubble CAPTCHA and a custom agent designed to attempt solving it.  
 
+Use respective .sh or .bat files to run individual agents:
+- .\custom_agent.bat
+
+or follow the following instructions:
 ---
 
-## **Running the CAPTCHA on a Raspberry Pi (RPi)**
+## **Connecting to Raspberry Pi (RPi) to run frontend (OPTIONAL)**
 
 1. **Connect to TCD VPN**  
 - tailscale login --login-server https://vpn-student.scss.tcd.ie
@@ -13,20 +17,25 @@ This repository contains a simple interactive bubble CAPTCHA and a custom agent 
 - ssh your-username@macneill.tcd.ie
 
 3. **SSH to the RPi and set up port forwarding**
-Example (for local port 8080 forwarded to RPi port 3000):
-- ssh -L 8080:localhost:3000 -J your-username@macneill.tcd.ie your-username@rasp-021.berry.scss.tcd.ie
+Example (for local port 3000 forwarded to RPi port 3000):
+- ssh -L 3000:localhost:3000 -J your-username@macneill.tcd.ie your-username@rasp-021.berry.scss.tcd.ie
 
-4. **Run the CAPTCHA frontend**
+## **Running the CAPTCHA**
+
+**Run the CAPTCHA frontend (locally or on RPi)**
 - python frontend/app.py
+Assuming 'frontend' folder has already been added to RPi
+The CAPTCHA should now be accessible via http://localhost:3000 on your local machine.
 
-The CAPTCHA should now be accessible via http://localhost:8080 on your local machine.
+## **Custom Agent Attacker**
 
-## **Running the Custom Agent Locally**
-Assuming the CAPTCHA is accessible via the tunneled port (e.g., 8080):
+This Agent is custom built for this CAPTCHA and uses fully local elements to function.
+
+Assuming the CAPTCHA is accessible via port 3000:
 
 ---
 
-- python trigger_custom_agent.py
+- python frontend/trigger_custom_agent.py
 
 The agent will connect to the CAPTCHA, track the bubbles, and attempt to solve the task automatically.
 
@@ -51,7 +60,7 @@ The main file is `vlm.py`. run that file.
    pip install -r requirements.txt
    ```
 
-3. Start your captcha server. it should show a page with a canvas (default url is `http://127.0.0.1:5000/captcha`)  
+3. Start your captcha server. it should show a page with a canvas (default url is `http://127.0.0.1:3000/captcha`)  
 4. Start the ollama server (download from the ollama website), for example:
 
    ```bash
@@ -71,13 +80,13 @@ The script will open the captcha in a headless browser, track bubbles, send fram
 In `vlm.py` there is this line:
 
 ```python
-sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:5000/captcha")
+sp: SeleniumPortal = SeleniumPortal("http://127.0.0.1:3000/captcha")
 ```
 
 change the url string to your own captcha page if it is different. for example:
 
 ```python
-sp: SeleniumPortal = SeleniumPortal("http://my-server:5000/captcha")
+sp: SeleniumPortal = SeleniumPortal("http://my-server:3000/captcha")
 ```
 
 ### Change ollama url

@@ -8,6 +8,19 @@ from selenium.webdriver.common.action_chains import ActionChains
 import time
 import os
 
+# ============================
+# Module: bubble_solver.py (brute force attacker)
+# Contribution: Yifan Li
+# 
+# Main Contribution:
+# - Set up the Selenium WebDriver environment
+# - Implemented the BubbleCaptchaSolver class structure
+# - Added automated browser interaction utilities (driver creation,
+#   screenshot handling, waiting for elements, etc.)
+#
+# Notes:
+# This component is part of the automation and UI-interaction layer (flask).
+# ============================
 
 class BubbleCaptchaSolver:
     def __init__(self):

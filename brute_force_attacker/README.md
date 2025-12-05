@@ -109,6 +109,8 @@ These strategies are part of **test-driven development (TDD)** and **system robu
     * Chromium / Chrome browser
     * Matching version of ChromeDriver
 
+run install.sh
+
 ---
 
 **b. Start Your Local CAPTCHA Page**

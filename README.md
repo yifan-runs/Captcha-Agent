@@ -4,6 +4,7 @@ This repository contains a simple interactive bubble CAPTCHA and a custom agent 
 
 Use respective .sh or .bat files to run individual agents:
 - .\custom_agent.bat
+- .\brute_force_attack.sh
 
 or follow the following instructions:
 ---

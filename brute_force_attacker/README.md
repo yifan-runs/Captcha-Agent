@@ -1,5 +1,3 @@
-# Final Version: version4_pro-pi & frontend2
-
 ## 1. Project Overview: A Brute Force Testing Tool
 
 This project is an automated testing script based on **Python + Selenium + Chromium**, designed for:
